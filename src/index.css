@@ -1,0 +1,142 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-dark-900 text-slate-100 min-h-screen overflow-x-hidden antialiased;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Outfit', sans-serif;
+  }
+}
+
+/* Glassmorphism utility classes */
+.glass-panel {
+  @apply bg-slate-900/40 backdrop-blur-md border border-slate-800/60 shadow-xl;
+}
+
+.glass-card {
+  @apply bg-slate-900/60 backdrop-blur-lg border border-slate-800/80 shadow-2xl;
+}
+
+.glass-input {
+  @apply bg-slate-950/50 border border-slate-800 focus:border-rose-500 focus:ring-1 focus:ring-rose-500 text-white rounded-xl transition-all duration-300 outline-none;
+}
+
+/* Animated gradient backgrounds */
+.bg-gradient-animated {
+  background: linear-gradient(-45deg, #0a0204, #030001, #4c0519, #030001);
+  background-size: 400% 400%;
+  animation: gradientBG 15s ease infinite;
+}
+
+@keyframes gradientBG {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+/* Hide scrollbar but keep functionality */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* ────────────────────────────────────────────────
+   Range Slider: bolinha branca → vermelha ao arrastar
+   --slider-pct é calculado no JSX para o preenchimento.
+   Fluido: transition 0ms no background, 150ms no thumb.
+   ──────────────────────────────────────────────── */
+.quiz-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 9999px;
+  background: linear-gradient(
+    to right,
+    var(--slider-color, #f43f5e) calc(var(--slider-pct, 44%)),
+    #1e293b calc(var(--slider-pct, 44%))
+  );
+  outline: none;
+  cursor: pointer;
+  transition: background 0ms; /* zero delay: acompanha o dedo imediatamente */
+}
+
+/* Thumb — círculo branco com borda que segue a cor de dificuldade */
+.quiz-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 3px solid var(--slider-color, #f43f5e);
+  box-shadow: 0 0 0 0 rgba(244, 63, 94, 0);
+  cursor: grab;
+  transition: background 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+/* Thumb dragging → fica da cor do nível */
+.quiz-slider:active::-webkit-slider-thumb {
+  background: var(--slider-color, #f43f5e);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--slider-color, #f43f5e) 30%, transparent);
+  cursor: grabbing;
+  transform: scale(1.18);
+}
+
+.quiz-slider:hover::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px rgba(244, 63, 94, 0.18);
+}
+
+/* Firefox */
+.quiz-slider::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 3px solid var(--slider-color, #f43f5e);
+  cursor: grab;
+  transition: background 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.quiz-slider:active::-moz-range-thumb {
+  background: var(--slider-color, #f43f5e);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--slider-color, #f43f5e) 30%, transparent);
+  cursor: grabbing;
+  transform: scale(1.18);
+}
+
+.quiz-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: #1e293b;
+}
+
+/* ────────────────────────────────────────────────
+   Number Input: remove setas nativas do browser.
+   Usamos botões +/- customizados no JSX.
+   ──────────────────────────────────────────────── */
+.quiz-number-input::-webkit-inner-spin-button,
+.quiz-number-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.quiz-number-input {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}

@@ -1,0 +1,92 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Profile {
+  id        String   @id @db.Uuid
+  name      String
+  email     String   @unique
+  apiKey    Json?    @map("api_key")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  attempts QuizAttempt[]
+  quizzes  Quiz[]
+  rooms    Room[]
+  members  RoomMember[]
+
+  @@map("profiles")
+}
+
+model Quiz {
+  id        String   @id @default(uuid()) @db.Uuid
+  createdBy String?  @map("created_by") @db.Uuid
+  topic     String
+  difficulty String
+  questions Json     // Lista de perguntas QuizQuestion: [{id, questionText, options, correctOptionIndex, explanation, isPopularExam}]
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  profile   Profile? @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+  attempts  QuizAttempt[]
+  rooms     Room[]
+
+  @@map("quizzes")
+}
+
+model Room {
+  id           String   @id @default(uuid()) @db.Uuid
+  code         String   @unique
+  ownerId      String   @map("owner_id") @db.Uuid
+  maxGuests    Int      @default(50) @map("max_guests")
+  activeQuizId String?  @map("active_quiz_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  expiresAt    DateTime @default(dbgenerated("(now() + '7 days'::interval)")) @map("expires_at") @db.Timestamptz
+
+  owner        Profile  @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  activeQuiz   Quiz?    @relation(fields: [activeQuizId], references: [id], onDelete: SetNull)
+  members      RoomMember[]
+  attempts     QuizAttempt[]
+
+  @@map("rooms")
+}
+
+model RoomMember {
+  roomId   String   @map("room_id") @db.Uuid
+  userId   String   @map("user_id") @db.Uuid
+  role     String   @default("member") // "owner", "leader", "member"
+  status   String   @default("active") // "active", "absent"
+  joinedAt DateTime @default(now()) @map("joined_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  room     Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  profile  Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([roomId, userId])
+  @@map("room_members")
+}
+
+model QuizAttempt {
+  id                String   @id @default(uuid()) @db.Uuid
+  userId            String   @map("user_id") @db.Uuid
+  quizId            String   @map("quiz_id") @db.Uuid
+  roomId            String?  @map("room_id") @db.Uuid
+  questionsTotal    Int      @map("questions_total")
+  questionsCorrect  Int      @map("questions_correct")
+  percentageCorrect Decimal  @map("percentage_correct") @db.Decimal(5, 2)
+  totalScore        Decimal  @map("total_score") @db.Decimal(10, 2)
+  timeSpent         Int      @map("time_spent")
+  answers           Json     // Respostas do usuário: [{questionId, selectedOptionIndex, isCorrect}]
+  completedAt       DateTime @default(now()) @map("completed_at") @db.Timestamptz
+
+  profile           Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  quiz              Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  room              Room?    @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@map("quiz_attempts")
+}
