@@ -3,14 +3,15 @@ import type { DifficultyLevel, RagFile, RagImage } from '../../types/quiz.types'
 import { Button } from '../Common/Button';
 import { AlertTriangle, Settings, Loader, UploadCloud, FileText, Trash2, CheckCircle, FileSpreadsheet, File } from 'lucide-react';
 import { useMultiSourceTrivia } from '../../hooks/useMultiSourceTrivia';
-import { 
-  parseTxt, 
-  readImageAsBase64, 
-  parseDocx, 
-  parsePptx, 
-  parseXlsx, 
-  loadPdfJS, 
-  parsePdf 
+import { Toast } from '../Common/Toast';
+import {
+  parseTxt,
+  readImageAsBase64,
+  parseDocx,
+  parsePptx,
+  parseXlsx,
+  loadPdfJS,
+  parsePdf
 } from '../../utils/fileParser';
 
 // ─── Constantes de domínio ────────────────────────────────────────────────────
@@ -56,13 +57,19 @@ const sliderPercent = (val: number): string =>
   `${((val - DIFFICULTY_MIN) / (DIFFICULTY_MAX - DIFFICULTY_MIN)) * 100}%`;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+export interface BlendedQuizOptions {
+  iaPercent: number;
+  ragPercent: number;
+  examPercent: number;
+  ragFiles: RagFile[];
+}
+
 interface QuizSetupProps {
   onStartQuiz: (
-    topic: string, 
-    difficulty: DifficultyLevel, 
-    count: number, 
-    popularExamOnly?: boolean,
-    ragFiles?: RagFile[]
+    topic: string,
+    difficulty: DifficultyLevel,
+    count: number,
+    options?: BlendedQuizOptions
   ) => void;
   isLoading: boolean;
   isTriviaMode?: boolean;
@@ -128,12 +135,118 @@ export const QuizSetup: React.FC<QuizSetupProps> = ({
   const [difficulty, setDifficulty] = useState<DifficultyLevel>('5');
   const [count, setCount] = useState<number>(5);
   const [isCustomCount, setIsCustomCount] = useState<boolean>(false);
-  const [popularExamOnly, setPopularExamOnly] = useState<boolean>(false);
 
-  // RAG States
-  const [isRagActive, setIsRagActive] = useState<boolean>(false);
+  const [activeModels, setActiveModels] = useState<{ ia: boolean; rag: boolean; exam: boolean }>({
+    ia: true,
+    rag: false,
+    exam: false,
+  });
+
+  const [percentages, setPercentages] = useState<{ ia: number; rag: number; exam: number }>({
+    ia: 100,
+    rag: 0,
+    exam: 0,
+  });
+
+  const isRagActive = activeModels.rag;
   const [ragFiles, setRagFiles] = useState<RagFile[]>([]);
   const [isDragging, setIsDragging] = useState<boolean>(false);
+
+  const [localToast, setLocalToast] = useState<{ message: string; type: 'success' | 'error' | 'info'; isVisible: boolean }>({
+    message: '',
+    type: 'info',
+    isVisible: false,
+  });
+
+  const showLocalToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setLocalToast({ message, type, isVisible: true });
+  };
+
+  const getActiveCount = () => {
+    return (activeModels.ia ? 1 : 0) + (activeModels.rag ? 1 : 0) + (activeModels.exam ? 1 : 0);
+  };
+
+  const handleToggleModel = (model: 'ia' | 'rag' | 'exam') => {
+    const nextActiveModels = {
+      ...activeModels,
+      [model]: !activeModels[model]
+    };
+
+    setActiveModels(nextActiveModels);
+
+    const newActiveKeys = (Object.keys(nextActiveModels) as Array<'ia' | 'rag' | 'exam'>).filter(
+      (k) => nextActiveModels[k]
+    );
+
+    const newPercentages = { ia: 0, rag: 0, exam: 0 };
+    if (newActiveKeys.length === 1) {
+      newPercentages[newActiveKeys[0]] = 100;
+    } else if (newActiveKeys.length === 2) {
+      newPercentages[newActiveKeys[0]] = 50;
+      newPercentages[newActiveKeys[1]] = 50;
+    } else if (newActiveKeys.length === 3) {
+      newPercentages.ia = 34;
+      newPercentages.rag = 33;
+      newPercentages.exam = 33;
+    } else {
+      newPercentages.ia = 0;
+      newPercentages.rag = 0;
+      newPercentages.exam = 0;
+    }
+
+    setPercentages(newPercentages);
+  };
+
+  const handlePercentageChange = (model: 'ia' | 'rag' | 'exam', newPct: number) => {
+    const activeKeys = (Object.keys(activeModels) as Array<'ia' | 'rag' | 'exam'>).filter(
+      (k) => activeModels[k]
+    );
+    if (activeKeys.length <= 1) return;
+
+    const clampedPct = Math.max(0, Math.min(100, newPct));
+    const remaining = 100 - clampedPct;
+    const otherActiveKeys = activeKeys.filter((k) => k !== model);
+
+    if (otherActiveKeys.length === 1) {
+      setPercentages((prev) => ({
+        ...prev,
+        [model]: clampedPct,
+        [otherActiveKeys[0]]: remaining,
+      }));
+    } else {
+      // São 2 outros modelos ativos. Distribuímos o valor restante proporcionalmente
+      // ao valor que eles já tinham previamente para manter suas relações relativas.
+      const other1 = otherActiveKeys[0];
+      const other2 = otherActiveKeys[1];
+
+      const prevVal1 = percentages[other1];
+      const prevVal2 = percentages[other2];
+      const prevSum = prevVal1 + prevVal2;
+
+      let newVal1 = 0;
+      let newVal2 = 0;
+
+      if (prevSum === 0) {
+        // Fallback: se ambos eram zero, distribui igualmente o restante
+        newVal1 = Math.floor(remaining / 2);
+        newVal2 = remaining - newVal1;
+      } else {
+        newVal1 = Math.round(remaining * (prevVal1 / prevSum));
+        newVal2 = remaining - newVal1;
+
+        // Garante integridade matemática dentro da faixa 0-remaining
+        newVal1 = Math.max(0, Math.min(remaining, newVal1));
+        newVal2 = remaining - newVal1;
+      }
+
+      setPercentages((prev) => ({
+        ...prev,
+        [model]: clampedPct,
+        [other1]: newVal1,
+        [other2]: newVal2,
+      }));
+    }
+  };
 
   const diffVal = parseInt(difficulty) || DIFFICULTY_MIN;
 
@@ -243,6 +356,12 @@ export const QuizSetup: React.FC<QuizSetupProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!isTriviaMode) {
+      const activeCount = getActiveCount();
+      if (activeCount === 0) {
+        showLocalToast('Você deve manter pelo menos uma opção de elaboração de questão ativa.', 'error');
+        return;
+      }
+
       const finalTopic = topic.trim();
       if (!finalTopic && !isRagActive) return;
 
@@ -263,8 +382,12 @@ export const QuizSetup: React.FC<QuizSetupProps> = ({
         isRagActive && !finalTopic ? 'Material de Conteúdo' : finalTopic,
         difficulty,
         count,
-        popularExamOnly,
-        isRagActive ? ragFiles : undefined
+        {
+          iaPercent: activeModels.ia ? percentages.ia : 0,
+          ragPercent: activeModels.rag ? percentages.rag : 0,
+          examPercent: activeModels.exam ? percentages.exam : 0,
+          ragFiles: activeModels.rag ? ragFiles : [],
+        }
       );
       return;
     }
@@ -412,119 +535,7 @@ export const QuizSetup: React.FC<QuizSetupProps> = ({
           </div>
         ) : (
           <div className="space-y-6">
-            {/* Toggle RAG */}
-            <div className={`p-4 rounded-xl border transition-all duration-300 ${
-              isRagActive 
-                ? 'bg-rose-950/10 border-rose-500/30' 
-                : 'bg-slate-950/25 border-slate-800/60'
-            }`}>
-              <div className="flex gap-3 items-center justify-between">
-                <div className="flex gap-3 items-start">
-                  <div className={`p-2 border rounded-xl shrink-0 mt-0.5 transition-colors ${
-                    isRagActive
-                      ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
-                      : 'bg-slate-800/50 text-slate-400 border-slate-700/50'
-                  }`}>
-                    <UploadCloud size={18} />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-200">
-                      Estudar com Conteúdo Próprio (RAG)
-                    </label>
-                    <p className="text-[11px] text-slate-400 leading-relaxed">
-                      Gere questões com base em arquivos PDF, Word, Excel, PowerPoint, Imagens ou Textos enviados por você.
-                    </p>
-                  </div>
-                </div>
-                
-                <button
-                  type="button"
-                  onClick={() => setIsRagActive(!isRagActive)}
-                  className={`w-11 h-6 rounded-full transition-all duration-300 relative shrink-0 focus:outline-none focus:ring-1 focus:ring-rose-500 ${
-                    isRagActive ? 'bg-rose-500' : 'bg-slate-800'
-                  }`}
-                  role="switch"
-                  aria-checked={isRagActive}
-                >
-                  <span
-                    className={`block w-4 h-4 rounded-full bg-white transition-all duration-300 absolute top-1 ${
-                      isRagActive ? 'translate-x-6' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </div>
-              
-              {isRagActive && (
-                <div className="mt-4 space-y-4 border-t border-slate-800/60 pt-4 animate-fade-in">
-                  <div
-                    onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-                    onDragLeave={() => setIsDragging(false)}
-                    onDrop={(e) => { e.preventDefault(); setIsDragging(false); handleFileChange(e.dataTransfer.files); }}
-                    onClick={() => document.getElementById('rag-file-input')?.click()}
-                    className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all ${
-                      isDragging 
-                        ? 'border-rose-500 bg-rose-500/5' 
-                        : 'border-slate-800 hover:border-rose-500/50 hover:bg-slate-950/45'
-                    }`}
-                  >
-                    <input
-                      id="rag-file-input"
-                      type="file"
-                      multiple
-                      className="hidden"
-                      accept=".txt,.md,.pdf,.docx,.xlsx,.xls,.pptx,.png,.jpg,.jpeg,.webp"
-                      onChange={(e) => handleFileChange(e.target.files)}
-                    />
-                    <UploadCloud size={32} className="mx-auto text-slate-500 mb-2 transition-colors" />
-                    <p className="text-xs font-bold text-slate-300">Arraste seus arquivos aqui ou clique para buscar</p>
-                    <p className="text-[10px] text-slate-500 mt-1">
-                      Suporta PDF, Word (.docx), Excel (.xlsx/.xls), PowerPoint (.pptx), Imagens (PNG/JPG) e TXT/MD (Máx: 10MB)
-                    </p>
-                  </div>
-                  
-                  {ragFiles.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Arquivos Carregados ({ragFiles.length}/5)</p>
-                      <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                        {ragFiles.map(file => (
-                          <div key={file.id} className="flex items-center justify-between p-2.5 bg-slate-950/40 border border-slate-900 rounded-lg">
-                            <div className="flex items-center gap-2.5 overflow-hidden">
-                              {getFileIcon(file.name)}
-                              <div className="overflow-hidden">
-                                <p className="text-xs font-semibold text-slate-200 truncate">{file.name}</p>
-                                <p className="text-[10px] text-slate-500 font-mono">
-                                  {(file.size / 1024).toFixed(1)} KB 
-                                  {file.status === 'success' && file.text && ` • ${file.text.length} chars`}
-                                  {file.status === 'success' && file.images.length > 0 && ` • ${file.images.length} imgs`}
-                                </p>
-                              </div>
-                            </div>
-                            
-                            <div className="flex items-center gap-2 shrink-0">
-                              {file.status === 'loading' && <Loader size={14} className="animate-spin text-rose-500" />}
-                              {file.status === 'success' && <CheckCircle size={14} className="text-emerald-400" />}
-                              {file.status === 'error' && (
-                                <span className="text-[10px] text-rose-400 font-semibold max-w-[120px] truncate" title={file.errorMessage}>
-                                  {file.errorMessage}
-                                </span>
-                              )}
-                              
-                              <button
-                                type="button"
-                                onClick={() => setRagFiles(prev => prev.filter(f => f.id !== file.id))}
-                                className="p-1 text-slate-500 hover:text-rose-400 transition-colors"
-                              >
-                                <Trash2 size={13} />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+
 
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
@@ -535,8 +546,8 @@ export const QuizSetup: React.FC<QuizSetupProps> = ({
                 required={!isRagActive}
                 value={topic}
                 onChange={(e) => setTopic(e.target.value)}
-                placeholder={isRagActive 
-                  ? "Ex: Focar em fórmulas específicas, focar na introdução..." 
+                placeholder={isRagActive
+                  ? "Ex: Focar em fórmulas específicas, focar na introdução..."
                   : "Ex: Astrofísica, Marvel, Mitologia Nórdica, Cinema..."
                 }
                 className="w-full px-4 py-3 bg-slate-950/50 border border-slate-800 rounded-xl text-white outline-none placeholder-slate-700 focus:border-rose-500 focus:ring-1 focus:ring-rose-500 transition-all"
@@ -641,60 +652,227 @@ export const QuizSetup: React.FC<QuizSetupProps> = ({
           )}
         </div>
 
-        {/* Questões populares em provas */}
-        <div className={`p-4 rounded-xl border flex items-center justify-between gap-4 transition-all duration-300 ${
-          isTriviaMode 
-            ? 'bg-slate-950/10 border-slate-900/40 opacity-50 cursor-not-allowed' 
-            : 'bg-slate-950/25 border-slate-800/60'
-        }`}>
-          <div className="flex gap-3 items-start">
-            <div className={`p-2 border rounded-xl shrink-0 mt-0.5 transition-colors ${
-              isTriviaMode
-                ? 'bg-slate-900/30 text-slate-600 border-slate-800/40'
-                : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-            }`}>
-              <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
-                <path d="M6 12v5c0 2 2 3 6 3s6-1 6-3v-5" />
-              </svg>
-            </div>
-            <div className="space-y-1">
-              <label className={`block text-xs font-bold uppercase tracking-wider ${
-                isTriviaMode ? 'text-slate-500' : 'text-slate-200'
-              }`}>
-                Questões populares em provas {isTriviaMode && <span className="text-[9px] text-rose-400 font-semibold tracking-normal lowercase ml-1">(requer chave de IA)</span>}
-              </label>
-              <p className="text-[11px] text-slate-400 leading-relaxed">
-                Gera 50% de questões recorrentes de vestibulares/concursos e 50% de fatos e curiosidades relevantes.
-              </p>
+        {!isTriviaMode && (
+          <div className="space-y-4">
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+              Elaboração das Questões
+            </label>
+            <div className="space-y-3 bg-slate-950/20 border border-slate-800/60 p-4 rounded-xl">
+
+              {/* Opção 1: Geração por IA (Tema Livre) */}
+              <div className="space-y-2 border-b border-slate-800/40 pb-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className={`p-1.5 rounded-lg border transition-colors ${activeModels.ia
+                      ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                      : 'bg-slate-800/50 text-slate-400 border-slate-700/50'
+                      }`}>
+                      <svg className="w-[14px] h-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+                      </svg>
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold text-slate-200">Geração por IA (Tema Livre)</span>
+                      <p className="text-[10px] text-slate-500">Questões baseadas no tema digitado acima.</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleModel('ia')}
+                    className={`w-9 h-5 rounded-full transition-all duration-300 relative shrink-0 focus:outline-none ${
+                      activeModels.ia ? 'bg-rose-500' : 'bg-slate-800'
+                    }`}
+                  >
+                    <span className={`block w-4 h-4 rounded-full bg-white transition-all duration-300 absolute top-0.5 left-0.5 ${
+                      activeModels.ia ? 'translate-x-4' : 'translate-x-0'
+                    }`} />
+                  </button>
+                </div>
+                {activeModels.ia && getActiveCount() > 1 && (
+                  <div className="flex items-center gap-3 pl-8 animate-fade-in">
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={percentages.ia}
+                      onChange={(e) => handlePercentageChange('ia', parseInt(e.target.value) || 0)}
+                      className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-rose-500"
+                    />
+                    <span className="text-xs font-mono font-bold text-rose-400 shrink-0 w-10 text-right">{percentages.ia}%</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Opção 2: Conteúdo Próprio (RAG) */}
+              <div className="space-y-2 border-b border-slate-800/40 pb-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className={`p-1.5 rounded-lg border transition-colors ${activeModels.rag
+                      ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                      : 'bg-slate-800/50 text-slate-400 border-slate-700/50'
+                      }`}>
+                      <UploadCloud size={14} />
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold text-slate-200">Conteúdo Próprio (RAG)</span>
+                      <p className="text-[10px] text-slate-500">Questões criadas com base nos seus arquivos.</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleModel('rag')}
+                    className={`w-9 h-5 rounded-full transition-all duration-300 relative shrink-0 focus:outline-none ${
+                      activeModels.rag ? 'bg-rose-500' : 'bg-slate-800'
+                    }`}
+                  >
+                    <span className={`block w-4 h-4 rounded-full bg-white transition-all duration-300 absolute top-0.5 left-0.5 ${
+                      activeModels.rag ? 'translate-x-4' : 'translate-x-0'
+                    }`} />
+                  </button>
+                </div>
+                {activeModels.rag && getActiveCount() > 1 && (
+                  <div className="flex items-center gap-3 pl-8 animate-fade-in">
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={percentages.rag}
+                      onChange={(e) => handlePercentageChange('rag', parseInt(e.target.value) || 0)}
+                      className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-rose-500"
+                    />
+                    <span className="text-xs font-mono font-bold text-rose-400 shrink-0 w-10 text-right">{percentages.rag}%</span>
+                  </div>
+                )}
+
+                {/* Zona de Upload RAG */}
+                {activeModels.rag && (
+                  <div className="pl-8 pt-2 animate-fade-in space-y-3">
+                    <div
+                      onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                      onDragLeave={() => setIsDragging(false)}
+                      onDrop={(e) => { e.preventDefault(); setIsDragging(false); handleFileChange(e.dataTransfer.files); }}
+                      onClick={() => document.getElementById('rag-file-input')?.click()}
+                      className={`border border-dashed rounded-lg p-4 text-center cursor-pointer transition-all ${isDragging
+                        ? 'border-rose-500 bg-rose-500/5'
+                        : 'border-slate-800 hover:border-rose-500/50 hover:bg-slate-950/45'
+                        }`}
+                    >
+                      <input
+                        id="rag-file-input"
+                        type="file"
+                        multiple
+                        className="hidden"
+                        accept=".txt,.md,.pdf,.docx,.xlsx,.xls,.pptx,.png,.jpg,.jpeg,.webp"
+                        onChange={(e) => handleFileChange(e.target.files)}
+                      />
+                      <UploadCloud size={24} className="mx-auto text-slate-500 mb-1 transition-colors" />
+                      <p className="text-[11px] font-bold text-slate-300">Arraste seus arquivos aqui ou clique para buscar</p>
+                      <p className="text-[9px] text-slate-500 mt-0.5">
+                        PDF, DOCX, XLSX, PPTX, Imagens, TXT (Máx: 10MB)
+                      </p>
+                    </div>
+
+                    {ragFiles.length > 0 && (
+                      <div className="space-y-1.5">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Arquivos ({ragFiles.length}/5)</p>
+                        <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+                          {ragFiles.map(file => (
+                            <div key={file.id} className="flex items-center justify-between p-2 bg-slate-950/40 border border-slate-900 rounded-lg">
+                              <div className="flex items-center gap-2 overflow-hidden">
+                                {getFileIcon(file.name)}
+                                <div className="overflow-hidden">
+                                  <p className="text-[11px] font-semibold text-slate-200 truncate">{file.name}</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {file.status === 'loading' && <Loader size={12} className="animate-spin text-rose-500" />}
+                                {file.status === 'success' && <CheckCircle size={12} className="text-emerald-400" />}
+                                {file.status === 'error' && <span className="text-[9px] text-rose-400 truncate max-w-[80px]">{file.errorMessage}</span>}
+                                <button
+                                  type="button"
+                                  onClick={() => setRagFiles(prev => prev.filter(f => f.id !== file.id))}
+                                  className="p-0.5 text-slate-500 hover:text-rose-400 transition-colors"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Opção 3: Questões de Prova */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className={`p-1.5 rounded-lg border transition-colors ${activeModels.exam
+                      ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                      : 'bg-slate-800/50 text-slate-400 border-slate-700/50'
+                      }`}>
+                      <svg className="w-[14px] h-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
+                        <path d="M6 12v5c0 2 2 3 6 3s6-1 6-3v-5" />
+                      </svg>
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold text-slate-200">Questões de Provas Oficiais</span>
+                      <p className="text-[10px] text-slate-500">Questões recorrentes de vestibulares/concursos.</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleModel('exam')}
+                    className={`w-9 h-5 rounded-full transition-all duration-300 relative shrink-0 focus:outline-none ${
+                      activeModels.exam ? 'bg-rose-500' : 'bg-slate-800'
+                    }`}
+                  >
+                    <span className={`block w-4 h-4 rounded-full bg-white transition-all duration-300 absolute top-0.5 left-0.5 ${
+                      activeModels.exam ? 'translate-x-4' : 'translate-x-0'
+                    }`} />
+                  </button>
+                </div>
+                {activeModels.exam && getActiveCount() > 1 && (
+                  <div className="flex items-center gap-3 pl-8 animate-fade-in">
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={percentages.exam}
+                      onChange={(e) => handlePercentageChange('exam', parseInt(e.target.value) || 0)}
+                      className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-rose-500"
+                    />
+                    <span className="text-xs font-mono font-bold text-rose-400 shrink-0 w-10 text-right">{percentages.exam}%</span>
+                  </div>
+                )}
+              </div>
+
             </div>
           </div>
-          <button
-            type="button"
-            disabled={isTriviaMode}
-            onClick={() => setPopularExamOnly(!popularExamOnly)}
-            className={`w-11 h-6 rounded-full transition-all duration-300 relative shrink-0 focus:outline-none focus:ring-1 focus:ring-rose-500 ${
-              isTriviaMode
-                ? 'bg-slate-900 cursor-not-allowed'
-                : popularExamOnly 
-                  ? 'bg-rose-500' 
-                  : 'bg-slate-800'
-            }`}
-            role="switch"
-            aria-checked={popularExamOnly}
-          >
-            <span
-              className={`block w-4 h-4 rounded-full bg-white transition-all duration-300 absolute top-1 ${
-                popularExamOnly && !isTriviaMode ? 'translate-x-6' : 'translate-x-1'
-              }`}
-            />
-          </button>
-        </div>
+        )}
 
-        <Button type="submit" isLoading={isLoading} className="w-full mt-4">
+        <Button
+          type="submit"
+          isLoading={isLoading}
+          variant={!isTriviaMode && getActiveCount() === 0 ? 'secondary' : 'primary'}
+          className={`w-full mt-4 ${!isTriviaMode && getActiveCount() === 0
+            ? 'opacity-40 cursor-not-allowed transform-none active:scale-100'
+            : ''
+            }`}
+        >
           Iniciar Quiz
         </Button>
       </form>
+
+      <Toast
+        message={localToast.message}
+        type={localToast.type}
+        isVisible={localToast.isVisible}
+        onClose={() => setLocalToast((prev) => ({ ...prev, isVisible: false }))}
+      />
     </div>
   );
 };

@@ -1,23 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabaseClient';
 import { roomService } from '../../services/roomService';
-import type { Room, RoomMember, RoomStats, DifficultyLevel, RagFile } from '../../types/quiz.types';
+import type { Room, RoomMember, RoomStats, DifficultyLevel } from '../../types/quiz.types';
 import { RoomMembersList } from './RoomMembersList';
 import { RoomStatsView } from './RoomStatsView';
 import { Button } from '../Common/Button';
-import { QuizSetup } from '../Quiz/QuizSetup';
 import { 
+  Shield, 
+  KeyRound, 
   Users, 
-  BarChart3, 
-  Copy, 
+  Clock, 
+  ChevronRight, 
   Check, 
+  Copy, 
   LogOut, 
   Play, 
-  Clock, 
-  Shield, 
-  KeyRound,
-  ChevronRight
+  BarChart3 
 } from 'lucide-react';
+import { QuizSetup } from '../Quiz/QuizSetup';
+import type { BlendedQuizOptions } from '../Quiz/QuizSetup';
 
 interface RoomDashboardProps {
   currentUserId: string;
@@ -25,8 +26,7 @@ interface RoomDashboardProps {
     topic: string,
     difficulty: DifficultyLevel,
     count: number,
-    popularExamOnly: boolean,
-    ragFiles?: RagFile[]
+    options?: BlendedQuizOptions
   ) => void;
   onActiveQuizStarted: (quizId: string) => void;
   onActiveRoomChange?: (roomId: string | null) => void;
@@ -119,7 +119,7 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
 
   const loadUserRooms = async () => {
     try {
-      const rooms = await roomService.getUserRooms(currentUserId);
+      const rooms = await roomService.getUserRooms();
       setUserRooms(rooms);
     } catch (err: any) {
       showToast('Erro ao carregar suas salas.', 'error');
@@ -142,7 +142,7 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
   const handleCreateRoom = async () => {
     setIsCreating(true);
     try {
-      const room = await roomService.createRoom(currentUserId);
+      const room = await roomService.createRoom();
       setActiveRoom(room);
       await loadUserRooms();
       showToast('Sala de quiz criada com sucesso!', 'success');
@@ -155,11 +155,14 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
 
   const handleJoinRoom = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!joinCode.trim()) return;
+    if (!joinCode.trim()) {
+      showToast('Por favor, digite o código da sala.', 'error');
+      return;
+    }
 
     setIsJoining(true);
     try {
-      const room = await roomService.joinRoom(joinCode, currentUserId);
+      const room = await roomService.joinRoom(joinCode);
       setActiveRoom(room);
       await loadUserRooms();
       setJoinCode('');
@@ -214,7 +217,7 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
     if (!activeRoom) return;
     try {
       const nextStatus = currentStatus === 'active' ? 'absent' : 'active';
-      await roomService.updateMemberStatus(activeRoom.id, targetId, nextStatus, currentUserId);
+      await roomService.updateMemberStatus(activeRoom.id, targetId, nextStatus);
       showToast(nextStatus === 'absent' ? 'Membro marcado como Ausente.' : 'Membro marcado como Ativo.', 'success');
       loadRoomData(activeRoom.id);
     } catch (err: any) {
@@ -226,7 +229,7 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
     if (!activeRoom) return;
     try {
       const nextRole = currentRole === 'leader' ? 'member' : 'leader';
-      await roomService.updateMemberRole(activeRoom.id, targetId, nextRole, currentUserId);
+      await roomService.updateMemberRole(activeRoom.id, targetId, nextRole);
       showToast(nextRole === 'leader' ? 'Membro promovido a Líder.' : 'Líder rebaixado a Membro.', 'success');
       loadRoomData(activeRoom.id);
     } catch (err: any) {
@@ -279,26 +282,26 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
 
             {/* Ingressar na Sala */}
             <div className="glass-card p-6 rounded-2xl relative overflow-hidden">
-              <div className="absolute -bottom-10 -left-10 w-28 h-28 bg-amber-500/5 rounded-full blur-2xl pointer-events-none" />
+              <div className="absolute -bottom-10 -left-10 w-28 h-28 bg-rose-500/5 rounded-full blur-2xl pointer-events-none" />
               <form onSubmit={handleJoinRoom} className="space-y-4">
                 <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                  <KeyRound size={18} className="text-amber-400" />
+                  <KeyRound size={18} className="text-rose-400" />
                   Entrar com Código
                 </h3>
                 <p className="text-xs text-slate-400 leading-relaxed">
                   Digite o código de 6 caracteres fornecido pelo criador da sala.
                 </p>
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-3">
                   <input
                     type="text"
                     maxLength={6}
                     value={joinCode}
                     onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
                     placeholder="EX: A1B2C3"
-                    className="flex-1 px-4 py-2.5 bg-slate-950/50 border border-slate-800 rounded-xl text-white outline-none placeholder-slate-700 focus:border-rose-500 focus:ring-1 focus:ring-rose-500 text-center font-bold tracking-widest font-mono text-sm uppercase"
+                    className="w-full px-4 py-3 bg-slate-950/50 border border-slate-800 rounded-xl text-white outline-none placeholder-slate-700 focus:border-rose-500 focus:ring-1 focus:ring-rose-500 text-center font-bold tracking-widest font-mono text-sm uppercase"
                   />
-                  <Button type="submit" isLoading={isJoining} className="px-4 shrink-0">
-                    Entrar
+                  <Button type="submit" isLoading={isJoining} className="w-full">
+                    Entrar na Sala
                   </Button>
                 </div>
               </form>
@@ -476,8 +479,8 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
                     <QuizSetup
                       isLoading={isLoadingIAQuiz}
                       isTriviaMode={false} // Apenas IA nas salas para manter o padrão premium
-                      onStartQuiz={async (topic, difficulty, count, popularExamOnly, ragFiles) => {
-                        onStartRoomQuiz(topic, difficulty, count, popularExamOnly || false, ragFiles);
+                      onStartQuiz={async (topic, difficulty, count, options) => {
+                        onStartRoomQuiz(topic, difficulty, count, options);
                       }}
                     />
                   </div>

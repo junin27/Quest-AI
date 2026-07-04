@@ -55,8 +55,8 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
     setLoading(true);
     try {
       const [userAttempts, userStats] = await Promise.all([
-        getUserAttempts(currentUser.id),
-        getUserStats(currentUser.id)
+        getUserAttempts(),
+        getUserStats()
       ]);
       setAttempts(userAttempts);
       setStats(userStats);

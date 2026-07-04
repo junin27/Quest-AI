@@ -1,6 +1,32 @@
 import type { QuizQuestion, RagImage } from '../types/quiz.types';
 import type { LLMProvider } from '../types/apiKey.types';
 
+// ─── Tipos internos de payload de API ────────────────────────────────────────
+
+interface GeminiInlineData {
+  mimeType: string;
+  data: string;
+}
+
+interface GeminiPart {
+  text?: string;
+  inlineData?: GeminiInlineData;
+}
+
+type OpenAIImageContent = {
+  type: 'image_url';
+  image_url: { url: string };
+};
+
+type OpenAITextContent = { type: 'text'; text: string };
+type OpenAIMessageContent = string | Array<OpenAITextContent | OpenAIImageContent>;
+
+interface AnthropicImageContent {
+  type: 'image';
+  source: { type: 'base64'; media_type: string; data: string };
+}
+type AnthropicMessageContent = string | Array<{ type: 'text'; text: string } | AnthropicImageContent>;
+
 // ─── Constantes e Defaults ───────────────────────────────────────────────────
 
 export const OFFLINE_KEY = 'mock-key-for-testing';
@@ -236,8 +262,9 @@ async function extractApiError(response: Response, provider: LLMProvider): Promi
   let body: ApiErrorBody = {};
   try {
     body = (await response.json()) as ApiErrorBody;
-  } catch {
-    // Se não for JSON, segue a vida
+  } catch (parseError) {
+    // Body não é JSON — log para debug, mas segue com statusText como fallback
+    console.warn(`Falha ao parsear body do erro HTTP ${response.status}:`, parseError);
   }
 
   const apiMessage = body.error?.message ?? response.statusText;
@@ -290,7 +317,7 @@ async function fetchGemini(
   images: RagImage[] = []
 ) {
   const url = `${PROVIDER_CONFIGS.gemini.url}/${modelId}:generateContent?key=${apiKey}`;
-  const parts: any[] = [{ text: prompt }];
+  const parts: GeminiPart[] = [{ text: prompt }];
 
   if (images && images.length > 0) {
     images.forEach((img) => {
@@ -329,15 +356,15 @@ async function fetchOpenAIFormat(
 
   if (provider === 'openrouter') {
     headers['HTTP-Referer'] = window.location.origin;
-    headers['X-Title'] = 'Quiz LLM App';
+    headers['X-Title'] = 'QuestAI';
   }
 
-  let messageContent: any = prompt;
+  let messageContent: OpenAIMessageContent = prompt;
   if (images && images.length > 0) {
     messageContent = [
-      { type: 'text', text: prompt },
+      { type: 'text' as const, text: prompt },
       ...images.map((img) => ({
-        type: 'image_url',
+        type: 'image_url' as const,
         image_url: {
           url: `data:${img.mimeType};base64,${img.base64Data}`,
         },
@@ -364,15 +391,15 @@ async function fetchAnthropic(
   images: RagImage[] = []
 ) {
   const url = PROVIDER_CONFIGS.anthropic.url;
-  let messageContent: any = prompt;
+  let messageContent: AnthropicMessageContent = prompt;
 
   if (images && images.length > 0) {
     messageContent = [
-      { type: 'text', text: prompt },
+      { type: 'text' as const, text: prompt },
       ...images.map((img) => ({
-        type: 'image',
+        type: 'image' as const,
         source: {
-          type: 'base64',
+          type: 'base64' as const,
           media_type: img.mimeType,
           data: img.base64Data,
         },
@@ -400,20 +427,23 @@ async function fetchAnthropic(
 
 // ─── Extratores de Texto por Família de API ───────────────────────────────────
 
-function parseGeminiResponse(json: any): string {
-  const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
+function parseGeminiResponse(json: unknown): string {
+  const candidate = (json as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> })
+    .candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!candidate) throw new Error('A IA retornou uma resposta vazia. Tente novamente.');
+  return candidate;
+}
+
+function parseOpenAIResponse(json: unknown): string {
+  const text = (json as { choices?: Array<{ message?: { content?: string } }> })
+    .choices?.[0]?.message?.content;
   if (!text) throw new Error('A IA retornou uma resposta vazia. Tente novamente.');
   return text;
 }
 
-function parseOpenAIResponse(json: any): string {
-  const text = json.choices?.[0]?.message?.content;
-  if (!text) throw new Error('A IA retornou uma resposta vazia. Tente novamente.');
-  return text;
-}
-
-function parseAnthropicResponse(json: any): string {
-  const text = json.content?.[0]?.text;
+function parseAnthropicResponse(json: unknown): string {
+  const text = (json as { content?: Array<{ text?: string }> })
+    .content?.[0]?.text;
   if (!text) throw new Error('A IA retornou uma resposta vazia. Tente novamente.');
   return text;
 }
@@ -456,6 +486,51 @@ export async function validateApiKey(
   }
 }
 
+function buildBlendedQuizPrompt(
+  topic: string,
+  difficultyDescription: string,
+  count: number,
+  counts: { ia: number; rag: number; exam: number },
+  ragDataContent?: string
+): string {
+  const instructions: string[] = [];
+  
+  if (counts.ia > 0) {
+    instructions.push(`- exatamente ${counts.ia} pergunta(s) baseada(s) em conhecimentos gerais, fatos interessantes e explicações completas sobre o tema "${topic}". Para estas perguntas, defina "isPopularExam": false no JSON.`);
+  }
+  if (counts.rag > 0 && ragDataContent) {
+    instructions.push(`- exatamente ${counts.rag} pergunta(s) baseada(s) estritamente nas informações contidas no "CONTEÚDO DO MATERIAL DE ESTUDO (CONTEXTO)" fornecido abaixo. Não use conhecimentos externos para estas. Para estas perguntas, defina "isPopularExam": false no JSON.`);
+  }
+  if (counts.exam > 0) {
+    instructions.push(`- exatamente ${counts.exam} pergunta(s) baseada(s) em questões recorrentes de exames oficiais (como ENEM, vestibulares, concursos públicos ou certificações) sobre o tema "${topic}". Para essas perguntas, defina obrigatoriamente a propriedade "isPopularExam": true no objeto JSON.`);
+  }
+
+  const contextSection = (counts.rag > 0 && ragDataContent)
+    ? `\nCONTEÚDO DO MATERIAL DE ESTUDO (CONTEXTO):\n"""\n${ragDataContent}\n"""\n`
+    : '';
+
+  return `Você é um gerador de quiz profissional. Sua tarefa é gerar exatamente ${count} perguntas de quiz exclusivas e de altíssima qualidade com nível de dificuldade "${difficultyDescription}".
+
+Você deve seguir rigorosamente a seguinte distribuição de fontes para as perguntas (o total deve somar exatamente ${count}):
+${instructions.join('\n')}
+${contextSection}
+Regras adicionais importantes:
+1. Misture as perguntas geradas de forma natural.
+2. Cada pergunta deve conter exatamente 4 alternativas e apenas uma resposta correta.
+3. Certifique-se de que a propriedade "isPopularExam" esteja definida corretamente para cada pergunta: true para as de exames oficiais, false para as outras.
+4. Retorne APENAS um array JSON válido (sem markdown, sem blocos de código \`\`\`, sem texto adicional) no seguinte formato:
+[
+  {
+    "id": "string-id-unico",
+    "questionText": "Texto da pergunta aqui",
+    "options": ["Opção A", "Opção B", "Opção C", "Opção D"],
+    "correctOptionIndex": 0,
+    "explanation": "Explicação detalhada do porquê ser a alternativa correta",
+    "isPopularExam": true/false
+  }
+]`;
+}
+
 export async function generateQuizQuestions(
   apiKey: string,
   topic: string,
@@ -464,7 +539,8 @@ export async function generateQuizQuestions(
   provider: LLMProvider = 'gemini',
   customModelId?: string,
   popularExamOnly: boolean = false,
-  ragData?: { text: string; images: RagImage[] }
+  ragData?: { text: string; images: RagImage[] },
+  percentages?: { ia: number; rag: number; exam: number }
 ): Promise<QuizQuestion[]> {
   if (!apiKey || apiKey === OFFLINE_KEY) {
     throw new Error(
@@ -475,9 +551,38 @@ export async function generateQuizQuestions(
   const modelId = customModelId?.trim() || PROVIDER_CONFIGS[provider].defaultModel;
   const difficultyDescription = buildDifficultyDescription(difficulty);
   
-  const prompt = ragData
-    ? buildQuizPromptWithContent(topic, difficultyDescription, count, ragData.text, popularExamOnly)
-    : buildQuizPrompt(topic, difficultyDescription, count, popularExamOnly);
+  let prompt: string;
+  if (percentages) {
+    const activeKeys: Array<'ia' | 'rag' | 'exam'> = [];
+    if (percentages.ia > 0) activeKeys.push('ia');
+    if (percentages.rag > 0 && ragData) activeKeys.push('rag');
+    if (percentages.exam > 0) activeKeys.push('exam');
+
+    // Se nenhuma chave estiver ativa ou faltar RAG data quando só RAG estiver selecionado, fallback para IA
+    if (activeKeys.length === 0) {
+      activeKeys.push('ia');
+      percentages.ia = 100;
+    }
+
+    const counts = { ia: 0, rag: 0, exam: 0 };
+    let sum = 0;
+    activeKeys.forEach((key, index) => {
+      if (index === activeKeys.length - 1) {
+        counts[key] = count - sum;
+      } else {
+        const val = Math.round((percentages[key] / 100) * count);
+        counts[key] = val;
+        sum += val;
+      }
+    });
+
+    prompt = buildBlendedQuizPrompt(topic, difficultyDescription, count, counts, ragData?.text);
+  } else {
+    prompt = ragData
+      ? buildQuizPromptWithContent(topic, difficultyDescription, count, ragData.text, popularExamOnly)
+      : buildQuizPrompt(topic, difficultyDescription, count, popularExamOnly);
+  }
+
   const images = ragData?.images || [];
 
   let response: Response;
@@ -505,7 +610,7 @@ export async function generateQuizQuestions(
     throw new Error(specificError);
   }
 
-  const responseJson: any = await response.json();
+  const responseJson: unknown = await response.json();
   let rawText = '';
 
   try {
