@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'http';
-import { prisma } from '../lib/prisma';
-import { validateToken } from '../lib/authMiddleware';
+import { prisma } from '../_lib/prisma';
+import { validateToken } from '../_lib/authMiddleware';
 
 interface VercelRequest extends IncomingMessage {
   body: any;
