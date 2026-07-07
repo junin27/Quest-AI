@@ -1,4 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'http';
+import { handleCors } from '../_lib/corsMiddleware';
+import { handleRateLimit } from '../_lib/rateLimitMiddleware';
 import { prisma } from '../_lib/prisma';
 import { validateToken } from '../_lib/authMiddleware';
 
@@ -24,18 +26,8 @@ function generateRoomCode(): string {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Configurar CORS
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  const origin = req.headers.origin || '';
-  if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization');
-
-  if (req.method === 'OPTIONS') {
-    res.writeHead(200);
-    res.end();
-    return;
-  }
+  if (handleCors(req, res)) return;
+  if (handleRateLimit(req, res)) return;
 
   if (req.method !== 'POST') {
     res.writeHead(405, { 'Content-Type': 'application/json' });

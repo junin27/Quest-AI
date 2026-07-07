@@ -26,7 +26,7 @@ export const ParticleBackground: React.FC = () => {
       const prevH = canvas.height;
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
-      
+
       if (particles.length === 0) {
         initParticles();
       } else {
@@ -42,8 +42,8 @@ export const ParticleBackground: React.FC = () => {
 
     const initParticles = () => {
       particles = [];
-      const cols = 8; // 8 colunas de grade
-      const rows = 6; // 6 linhas de grade
+      const cols = 6; // Reduzido de 7 para 5
+      const rows = 5; // Reduzido para 4 para manter a quantidade baixa
       const cellWidth = canvas.width / cols;
       const cellHeight = canvas.height / rows;
 
@@ -64,8 +64,8 @@ export const ParticleBackground: React.FC = () => {
           x += (Math.random() - 0.5) * cellWidth * 0.7;
           y += (Math.random() - 0.5) * cellHeight * 0.7;
 
-          // Velocidade com vetor de deriva constante aumentado (módulo de velocidade de 1.2 a 2.4 pixels/frame)
-          const speed = Math.random() * 1.2 + 1.2;
+          // Velocidade aumentada (entre 0.4 e 0.8 pixels por frame) para ficar visível sem ser frenético
+          const speed = Math.random() * 0.4 + 0.4;
           const angle = Math.random() * Math.PI * 2;
           const vx = Math.cos(angle) * speed;
           const vy = Math.sin(angle) * speed;
@@ -78,7 +78,7 @@ export const ParticleBackground: React.FC = () => {
             size: Math.random() * 24 + 16, // Tamanho entre 16px e 40px
             color: colors[Math.floor(Math.random() * colors.length)],
             rotation: Math.random() * Math.PI * 2,
-            vRotation: (Math.random() - 0.5) * 0.015, // Rotação mais perceptível
+            vRotation: (Math.random() - 0.5) * 0.006, // Rotação ligeiramente mais perceptível
           });
         }
       }
@@ -86,7 +86,7 @@ export const ParticleBackground: React.FC = () => {
 
     const draw = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      
+
       particles.forEach((p) => {
         p.x += p.vx;
         p.y += p.vy;
@@ -102,12 +102,12 @@ export const ParticleBackground: React.FC = () => {
         ctx.save();
         ctx.translate(p.x, p.y);
         ctx.rotate(p.rotation);
-        
+
         ctx.fillStyle = p.color;
         ctx.font = `800 ${p.size}px Outfit, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        
+
         ctx.fillText('?', 0, 0);
         ctx.restore();
       });
