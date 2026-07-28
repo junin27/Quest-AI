@@ -44,7 +44,9 @@ export function useRoomRealtime({
         (payload: unknown) => {
           const typedPayload = payload as RoomUpdatePayload;
           const updatedRoom = typedPayload.new;
-          if (updatedRoom.active_quiz_id && updatedRoom.active_quiz_id !== activeRoom.activeQuizId) {
+          const currentActiveQuizId = activeRoom.activeQuizId || (activeRoom as any).active_quiz_id;
+
+          if (updatedRoom.active_quiz_id && updatedRoom.active_quiz_id !== currentActiveQuizId) {
             showToast('Um novo quiz foi iniciado na sala! Redirecionando...', 'info');
             onActiveQuizStarted(updatedRoom.active_quiz_id);
           }

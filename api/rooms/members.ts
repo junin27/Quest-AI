@@ -51,6 +51,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         userId: m.userId,
         role: m.role,
         status: m.status,
+        isReady: m.isReady,
         joinedAt: m.joinedAt,
         name: m.profile.name,
         email: m.profile.email
@@ -173,6 +174,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         } else {
           res.writeHead(403, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Hierarquia insuficiente para expulsar este membro.' }));
+          return;
+        }
+      }
+
+      // 5. AÇÃO: MARCAR COMO PRONTO/NÃO PRONTO (ready)
+      else if (action === 'ready') {
+        const { isReady } = req.body || {};
+        if (typeof isReady !== 'boolean') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Parâmetro isReady (boolean) é obrigatório.' }));
+          return;
+        }
+
+        if (isSelf) {
+          await prisma.roomMember.update({
+            where: { roomId_userId: { roomId, userId: targetUserId } },
+            data: { isReady }
+          });
+        } else {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado: Você só pode alterar seu próprio status de pronto.' }));
           return;
         }
       }

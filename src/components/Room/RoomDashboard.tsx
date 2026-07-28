@@ -4,18 +4,21 @@ import type { Room, RoomMember, RoomStats, DifficultyLevel } from '../../types/q
 import { RoomMembersList } from './RoomMembersList';
 import { RoomStatsView } from './RoomStatsView';
 import { Button } from '../Common/Button';
+import { Modal } from '../Common/Modal';
 import { useRoomRealtime } from '../../hooks/useRoomRealtime';
-import { 
-  Shield, 
-  KeyRound, 
-  Users, 
-  Clock, 
-  ChevronRight, 
-  Check, 
-  Copy, 
-  LogOut, 
-  Play, 
-  BarChart3 
+import {
+  Shield,
+  KeyRound,
+  Users,
+  Clock,
+  ChevronRight,
+  Check,
+  Copy,
+  LogOut,
+  Play,
+  BarChart3,
+  X,
+  Edit
 } from 'lucide-react';
 import { QuizSetup } from '../Quiz/QuizSetup';
 import type { BlendedQuizOptions } from '../Quiz/QuizSetup';
@@ -34,6 +37,8 @@ interface RoomDashboardProps {
   isIAActive: boolean;
   onNavigateToApiSetup: () => void;
   isLoadingIAQuiz: boolean;
+  initialRoomCode?: string | null;
+  onClearInitialRoomCode?: () => void;
 }
 
 const getErrorMessage = (err: unknown): string => {
@@ -48,19 +53,28 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
   showToast,
   isIAActive,
   onNavigateToApiSetup,
-  isLoadingIAQuiz
+  isLoadingIAQuiz,
+  initialRoomCode,
+  onClearInitialRoomCode
 }) => {
   const [userRooms, setUserRooms] = useState<Room[]>([]);
   const [activeRoom, setActiveRoom] = useState<Room | null>(null);
   const [members, setMembers] = useState<RoomMember[]>([]);
   const [stats, setStats] = useState<RoomStats | null>(null);
-  
+
   const [joinCode, setJoinCode] = useState('');
   const [activeTab, setActiveTab] = useState<'lobby' | 'members' | 'stats'>('lobby');
   const [copied, setCopied] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
   const [isStartingQuiz, setIsStartingQuiz] = useState(false);
+  const [isLeaveModalOpen, setIsLeaveModalOpen] = useState(false);
+  const [isLeaving, setIsLeaving] = useState(false);
+
+  const [newRoomName, setNewRoomName] = useState('');
+  const [editingRoomName, setEditingRoomName] = useState('');
+  const [isEditNameModalOpen, setIsEditNameModalOpen] = useState(false);
+  const [isUpdatingName, setIsUpdatingName] = useState(false);
 
   useEffect(() => {
     if (onActiveRoomChange) {
@@ -72,12 +86,45 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
     loadUserRooms();
   }, [currentUserId]);
 
+  useEffect(() => {
+    if (initialRoomCode) {
+      const autoJoin = async () => {
+        try {
+          const room = await roomService.joinRoom(initialRoomCode);
+          setActiveRoom(room);
+          await loadUserRooms();
+          showToast('Você entrou na sala pelo link de convite!', 'success');
+        } catch (err: unknown) {
+          showToast(`Falha ao entrar na sala pelo link: ${getErrorMessage(err)}`, 'error');
+        } finally {
+          if (onClearInitialRoomCode) {
+            onClearInitialRoomCode();
+          }
+        }
+      };
+      autoJoin();
+    }
+  }, [initialRoomCode, onClearInitialRoomCode]);
+
+  const [isLoadingRooms, setIsLoadingRooms] = useState(false);
+
   const loadUserRooms = async () => {
+    const cached = roomService.getCachedUserRooms();
+    if (cached) {
+      setUserRooms(cached);
+    } else {
+      setIsLoadingRooms(true);
+    }
+
     try {
       const rooms = await roomService.getUserRooms();
       setUserRooms(rooms);
     } catch {
-      showToast('Erro ao carregar suas salas.', 'error');
+      if (!cached) {
+        showToast('Erro ao carregar suas salas.', 'error');
+      }
+    } finally {
+      setIsLoadingRooms(false);
     }
   };
 
@@ -106,14 +153,37 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
   const handleCreateRoom = async () => {
     setIsCreating(true);
     try {
-      const room = await roomService.createRoom();
+      const room = await roomService.createRoom(newRoomName.trim() || undefined);
       setActiveRoom(room);
       await loadUserRooms();
+      setNewRoomName('');
       showToast('Sala de quiz criada com sucesso!', 'success');
     } catch (err: unknown) {
       showToast(getErrorMessage(err), 'error');
     } finally {
       setIsCreating(false);
+    }
+  };
+
+  const handleUpdateRoomName = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeRoom) return;
+    if (!editingRoomName.trim()) {
+      showToast('O nome da sala não pode ficar vazio.', 'error');
+      return;
+    }
+
+    setIsUpdatingName(true);
+    try {
+      const updated = await roomService.updateRoomName(activeRoom.id, editingRoomName.trim());
+      setActiveRoom(updated);
+      await loadUserRooms();
+      setIsEditNameModalOpen(false);
+      showToast('Nome da sala atualizado com sucesso!', 'success');
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err), 'error');
+    } finally {
+      setIsUpdatingName(false);
     }
   };
 
@@ -138,21 +208,24 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
     }
   };
 
-  const handleLeaveRoom = async () => {
+  const handleLeaveRoom = () => {
     if (!activeRoom) return;
-    const confirmMsg = activeRoom.ownerId === currentUserId 
-      ? 'Deseja realmente sair? Como você é o dono, a sala inteira será encerrada.'
-      : 'Deseja sair desta sala de quiz?';
-      
-    if (!window.confirm(confirmMsg)) return;
+    setIsLeaveModalOpen(true);
+  };
 
+  const confirmLeaveRoom = async () => {
+    if (!activeRoom) return;
+    setIsLeaving(true);
     try {
       await roomService.kickMember(activeRoom.id, currentUserId, currentUserId);
       setActiveRoom(null);
       await loadUserRooms();
-      showToast('Você saiu da sala.', 'info');
+      showToast(activeRoom.ownerId === currentUserId ? 'Sala encerrada.' : 'Você saiu da sala.', 'info');
+      setIsLeaveModalOpen(false);
     } catch (err: unknown) {
       showToast(getErrorMessage(err), 'error');
+    } finally {
+      setIsLeaving(false);
     }
   };
 
@@ -163,6 +236,25 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
     setCopied(true);
     showToast('Link de convite copiado!', 'success');
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleSetReady = async (ready: boolean) => {
+    if (!activeRoom) return;
+
+    // Atualização otimista local imediata para resposta instantânea na tela
+    const previousMembers = [...members];
+    setMembers((prev) =>
+      prev.map((m) => (m.userId === currentUserId ? { ...m, isReady: ready } : m))
+    );
+
+    try {
+      await roomService.updateMemberReady(activeRoom.id, currentUserId, ready);
+      showToast(ready ? 'Você está pronto para o quiz!' : 'Confirmação de pronto cancelada.', 'success');
+    } catch (err: unknown) {
+      // Reverte o estado local em caso de erro na rede
+      setMembers(previousMembers);
+      showToast(`Erro ao alterar status: ${getErrorMessage(err)}`, 'error');
+    }
   };
 
   const handleKickMember = async (targetId: string) => {
@@ -206,7 +298,13 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
   };
 
   const myRole = getMyRole();
+  const me = members.find((m) => m.userId === currentUserId);
+  const isMeReady = me?.isReady || false;
+
   const canStartQuiz = myRole === 'owner' || myRole === 'leader';
+  
+  const totalGuests = members.length;
+  const readyGuests = members.filter((m) => m.isReady).length;
 
   const formatExpiration = (expiresAtStr: string): string => {
     const diff = new Date(expiresAtStr).getTime() - Date.now();
@@ -233,7 +331,20 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
               <p className="text-xs text-slate-400 leading-relaxed">
                 Gere um código exclusivo de 7 dias e convide até 50 pessoas para responder aos mesmos quizzes gerados por você.
               </p>
-              <Button onClick={handleCreateRoom} isLoading={isCreating} className="w-full mt-2">
+              <div className="flex flex-col gap-1.5 mt-2">
+                <label className="text-[10px] font-bold text-slate-450 uppercase tracking-wider">
+                  Nome da Sala (Opcional)
+                </label>
+                <input
+                  type="text"
+                  maxLength={30}
+                  value={newRoomName}
+                  onChange={(e) => setNewRoomName(e.target.value)}
+                  placeholder="Ex: Quiz de Sexta"
+                  className="w-full px-3.5 py-2.5 bg-slate-950/50 border border-slate-800 rounded-xl text-white outline-none placeholder-slate-700 focus:border-rose-500 focus:ring-1 focus:ring-rose-500 text-xs font-semibold"
+                />
+              </div>
+              <Button onClick={handleCreateRoom} isLoading={isCreating} className="w-full">
                 Criar Nova Sala
               </Button>
             </div>
@@ -271,7 +382,12 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
               Suas Salas Ativas
             </h3>
 
-            {userRooms.length === 0 ? (
+            {isLoadingRooms ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center p-6 text-slate-500">
+                <div className="w-8 h-8 border-4 border-rose-500 border-t-transparent rounded-full animate-spin mb-3" />
+                <p className="text-sm font-semibold">Carregando salas...</p>
+              </div>
+            ) : userRooms.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center text-center p-6 text-slate-500">
                 <Users size={40} className="stroke-[1.5] mb-2 text-slate-700" />
                 <p className="text-sm font-semibold">Nenhuma sala ativa encontrada.</p>
@@ -286,8 +402,13 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
                     className="w-full flex items-center justify-between p-4 bg-slate-950/30 border border-slate-800/60 rounded-xl hover:border-rose-500/40 hover:bg-slate-950/60 transition-all text-left group"
                   >
                     <div className="space-y-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-white font-bold font-mono tracking-wider">{room.code}</span>
+                        {room.name && (
+                          <span className="text-slate-350 text-xs font-bold truncate max-w-[200px]" title={room.name}>
+                            • {room.name}
+                          </span>
+                        )}
                         {room.ownerId === currentUserId && (
                           <span className="bg-rose-500/20 text-rose-400 border border-rose-500/30 px-2 py-0.5 rounded-full text-[9px] font-bold">
                             Dono
@@ -308,10 +429,45 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
         </div>
       ) : (
         <div className="glass-card rounded-2xl overflow-hidden">
+          <div className="px-6 pt-4 pb-2 border-b border-slate-800 bg-slate-950/20">
+            <button
+              onClick={() => {
+                setActiveRoom(null);
+                onActiveRoomChange(null);
+              }}
+              className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors font-bold"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
+              <span>Voltar para Lista de Salas</span>
+            </button>
+          </div>
           <div className="p-6 bg-slate-950/40 border-b border-slate-800/80 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="space-y-1">
               <div className="flex items-center gap-3">
-                <span className="text-2xl font-extrabold text-white font-mono tracking-wider">{activeRoom.code}</span>
+                <div className="flex flex-col">
+                  {activeRoom.name && (
+                    <span className="text-xs font-bold text-rose-400/90 tracking-wide uppercase mb-1">
+                      {activeRoom.name}
+                    </span>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl font-extrabold text-white font-mono tracking-wider">{activeRoom.code}</span>
+                    {activeRoom.ownerId === currentUserId && (
+                      <button
+                        onClick={() => {
+                          setEditingRoomName(activeRoom.name || '');
+                          setIsEditNameModalOpen(true);
+                        }}
+                        title="Editar nome da sala"
+                        className="p-1 hover:bg-slate-800 border border-slate-700/60 rounded text-slate-400 hover:text-white transition-colors"
+                      >
+                        <Edit size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
                 <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-900 border border-slate-800 text-[10px] text-slate-400 font-semibold">
                   <Clock size={11} className="text-slate-500" />
                   <span>{formatExpiration(activeRoom.expiresAt)}</span>
@@ -344,33 +500,30 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
           <div className="flex border-b border-slate-800 bg-slate-950/20">
             <button
               onClick={() => { setActiveTab('lobby'); setIsStartingQuiz(false); }}
-              className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all border-b-2 ${
-                activeTab === 'lobby'
-                  ? 'border-rose-500 text-white bg-rose-500/5'
-                  : 'border-transparent text-slate-500 hover:text-slate-300'
-              }`}
+              className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all border-b-2 ${activeTab === 'lobby'
+                ? 'border-rose-500 text-white bg-rose-500/5'
+                : 'border-transparent text-slate-500 hover:text-slate-300'
+                }`}
             >
               <Play size={14} />
               Lobby do Quiz
             </button>
             <button
               onClick={() => { setActiveTab('members'); setIsStartingQuiz(false); }}
-              className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all border-b-2 ${
-                activeTab === 'members'
-                  ? 'border-rose-500 text-white bg-rose-500/5'
-                  : 'border-transparent text-slate-500 hover:text-slate-300'
-              }`}
+              className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all border-b-2 ${activeTab === 'members'
+                ? 'border-rose-500 text-white bg-rose-500/5'
+                : 'border-transparent text-slate-500 hover:text-slate-300'
+                }`}
             >
               <Users size={14} />
               Membros ({members.length})
             </button>
             <button
               onClick={() => { setActiveTab('stats'); setIsStartingQuiz(false); }}
-              className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all border-b-2 ${
-                activeTab === 'stats'
-                  ? 'border-rose-500 text-white bg-rose-500/5'
-                  : 'border-transparent text-slate-500 hover:text-slate-300'
-              }`}
+              className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all border-b-2 ${activeTab === 'stats'
+                ? 'border-rose-500 text-white bg-rose-500/5'
+                : 'border-transparent text-slate-500 hover:text-slate-300'
+                }`}
             >
               <BarChart3 size={14} />
               Estatísticas da Sala
@@ -382,35 +535,87 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
               <div className="space-y-6">
                 {!isStartingQuiz ? (
                   <div className="text-center py-10 space-y-4 max-w-md mx-auto">
-                    <div className="w-16 h-16 bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-full flex items-center justify-center mx-auto mb-2 animate-pulse">
-                      <Play size={28} className="ml-1" />
+                    <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-2 animate-pulse border transition-all duration-300 ${
+                      isMeReady
+                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                        : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                    }`}>
+                      {isMeReady ? <Check size={28} strokeWidth={3} /> : <Play size={28} className="ml-1" />}
                     </div>
                     <h3 className="text-lg font-bold text-white">Pronto para Jogar?</h3>
                     <p className="text-xs text-slate-400 leading-relaxed">
                       Quando um líder ou o dono da sala iniciar um quiz, todos os participantes ativos entrarão no jogo automaticamente em tempo real.
                     </p>
-                    
+
                     {canStartQuiz ? (
                       <div className="pt-2">
-                        {isIAActive ? (
-                          <Button onClick={() => setIsStartingQuiz(true)} className="w-full flex items-center justify-center gap-2">
-                            <Play size={14} />
-                            Iniciar Novo Quiz
-                          </Button>
-                        ) : (
-                          <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-2 text-left">
-                            <p className="text-xs text-amber-300 leading-relaxed">
-                              <strong>Chave de API do Dono pendente:</strong> Para poder gerar quizzes personalizados nesta sala, você precisa configurar uma chave de IA em suas credenciais.
-                            </p>
-                            <Button onClick={onNavigateToApiSetup} className="w-full text-xs py-2 bg-amber-500 hover:bg-amber-600 border-none text-slate-950 font-bold">
-                              Configurar API Key
+                        <div className="flex items-stretch justify-center gap-3 w-full max-w-md mx-auto">
+                          {/* Botão de Pronto do Líder/Dono (Lado a lado, mesma largura) */}
+                          {!isMeReady ? (
+                            <Button
+                              onClick={() => handleSetReady(true)}
+                              variant="success"
+                              className="flex-1 flex items-center justify-center gap-1.5 font-bold py-3"
+                            >
+                              <Check size={16} strokeWidth={3} />
+                              <span>Pronto</span>
                             </Button>
+                          ) : (
+                            <Button
+                              onClick={() => handleSetReady(false)}
+                              variant="danger"
+                              className="flex-1 flex items-center justify-center gap-1.5 font-bold py-3"
+                            >
+                              <X size={16} strokeWidth={3} />
+                              <span>Cancelar</span>
+                            </Button>
+                          )}
+
+                          {/* Botão de Iniciar Quiz (Mesma largura) */}
+                          <Button
+                            onClick={() => setIsStartingQuiz(true)}
+                            variant="success"
+                            className="flex-1 flex items-center justify-center gap-2 font-bold shadow-md shadow-emerald-500/10 py-3"
+                          >
+                            <Play size={14} />
+                            Iniciar Quiz
+                          </Button>
+                        </div>
+
+                        {!isIAActive && (
+                          <div className="mt-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-left max-w-md mx-auto">
+                            <p className="text-[10px] text-amber-300 leading-relaxed">
+                              <strong>Aviso:</strong> Sem uma chave de IA configurada, você só poderá iniciar o quiz com os <strong>Temas do Banco de Dados</strong>. As opções de geração por IA estarão bloqueadas.
+                            </p>
                           </div>
                         )}
                       </div>
                     ) : (
-                      <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-[10px] text-slate-500 font-semibold font-mono">
-                        Aguardando início pelo líder...
+                      <div className="space-y-4 pt-2">
+                        <div className="flex flex-col gap-2.5 max-w-[200px] mx-auto">
+                          {!isMeReady ? (
+                            <Button
+                              onClick={() => handleSetReady(true)}
+                              variant="success"
+                              className="w-full flex items-center justify-center gap-2 font-bold"
+                            >
+                              <Check size={14} strokeWidth={3} />
+                              Estou Pronto!
+                            </Button>
+                          ) : (
+                            <Button
+                              onClick={() => handleSetReady(false)}
+                              variant="danger"
+                              className="w-full flex items-center justify-center gap-2 font-bold"
+                            >
+                              <X size={14} strokeWidth={3} />
+                              Cancelar Pronto
+                            </Button>
+                          )}
+                        </div>
+                        <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-[10px] text-slate-500 font-semibold font-mono">
+                          {isMeReady ? 'Você está pronto! Aguardando o líder iniciar...' : 'Aguardando você e outros membros ficarem prontos...'}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -428,7 +633,10 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
 
                     <QuizSetup
                       isLoading={isLoadingIAQuiz}
-                      isTriviaMode={false}
+                      isTriviaMode={!isIAActive}
+                      isIAActive={isIAActive}
+                      showModeToggle={true}
+                      onNavigateToApiSetup={onNavigateToApiSetup}
                       onStartQuiz={async (topic, difficulty, count, options) => {
                         onStartRoomQuiz(topic, difficulty, count, options);
                       }}
@@ -453,7 +661,97 @@ export const RoomDashboard: React.FC<RoomDashboardProps> = ({
               <RoomStatsView stats={stats} />
             )}
           </div>
+
+          {/* Rodapé de status de prontos */}
+          <div className="px-6 py-3.5 bg-slate-950/20 border-t border-slate-900/60 flex justify-end items-center">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider font-mono">
+              Status: {readyGuests}/{totalGuests} Prontos para Jogar
+            </span>
+          </div>
         </div>
+      )}
+
+      {activeRoom && (
+        <Modal
+          isOpen={isLeaveModalOpen}
+          onClose={() => setIsLeaveModalOpen(false)}
+          title={activeRoom.ownerId === currentUserId ? 'ENCERRAR SALA?' : 'Sair da Sala'}
+        >
+          <div className="space-y-4 pt-2">
+            <p className="text-sm text-slate-355 leading-relaxed">
+              {activeRoom.ownerId === currentUserId
+                ? 'Deseja realmente sair? Como você é o dono, a sala inteira será encerrada.'
+                : 'Deseja sair desta sala de quiz?'}
+            </p>
+            <div className="flex items-center justify-center gap-3 pt-3">
+              <Button
+                variant="danger"
+                onClick={() => setIsLeaveModalOpen(false)}
+                disabled={isLeaving}
+                size="sm"
+                className="flex items-center gap-1.5"
+              >
+                <X size={18} strokeWidth={3.5} />
+                CANCELAR
+              </Button>
+              <Button
+                variant="success"
+                onClick={confirmLeaveRoom}
+                isLoading={isLeaving}
+                size="sm"
+                className="flex items-center gap-1.5"
+              >
+                {!isLeaving && <Check size={18} strokeWidth={3.5} />}
+                {activeRoom.ownerId === currentUserId ? 'SIM, ENCERRAR' : 'Sim, Sair'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {activeRoom && (
+        <Modal
+          isOpen={isEditNameModalOpen}
+          onClose={() => setIsEditNameModalOpen(false)}
+          title="Editar Nome da Sala"
+        >
+          <form onSubmit={handleUpdateRoomName} className="space-y-4 pt-2">
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-semibold text-slate-400">Novo Nome da Sala</label>
+              <input
+                type="text"
+                maxLength={30}
+                value={editingRoomName}
+                onChange={(e) => setEditingRoomName(e.target.value)}
+                placeholder="Ex: Quiz de Sexta"
+                className="w-full px-4 py-3 bg-slate-950/50 border border-slate-800 rounded-xl text-white outline-none placeholder-slate-700 focus:border-rose-500 focus:ring-1 focus:ring-rose-500 text-sm font-semibold"
+              />
+            </div>
+            <div className="flex items-center justify-end gap-3 pt-3">
+              <Button
+                type="button"
+                variant="danger"
+                onClick={() => setIsEditNameModalOpen(false)}
+                disabled={isUpdatingName}
+                size="sm"
+                className="flex items-center gap-1.5"
+              >
+                <X size={18} strokeWidth={3.5} />
+                CANCELAR
+              </Button>
+              <Button
+                type="submit"
+                variant="success"
+                isLoading={isUpdatingName}
+                size="sm"
+                className="flex items-center gap-1.5"
+              >
+                {!isUpdatingName && <Check size={18} strokeWidth={3.5} />}
+                SALVAR
+              </Button>
+            </div>
+          </form>
+        </Modal>
       )}
     </div>
   );

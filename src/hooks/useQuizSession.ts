@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import type { User } from '../types/user.types';
 import type { QuizQuestion, DifficultyLevel, QuizAnswer } from '../types/quiz.types';
 import type { LLMProvider } from '../types/apiKey.types';
@@ -47,6 +47,7 @@ export interface UseQuizSessionReturn extends QuizSessionState {
     count: number,
     currentUser: User,
     currentUserPassword: string,
+    isTriviaMode: boolean,
     options?: BlendedQuizOptions
   ) => Promise<void>;
   handleAnswerSelected: (selectedIndex: number, timeSpent: number, isCorrect: boolean) => void;
@@ -120,9 +121,12 @@ export function useQuizSession(): UseQuizSessionReturn {
     }));
   }
 
-  function setActiveRoomId(id: string | null): void {
-    setState((prev) => ({ ...prev, activeRoomId: id }));
-  }
+  const setActiveRoomId = useCallback((id: string | null): void => {
+    setState((prev) => {
+      if (prev.activeRoomId === id) return prev;
+      return { ...prev, activeRoomId: id };
+    });
+  }, []);
 
   function applyQuizStart(
     questions: QuizQuestion[],
@@ -252,12 +256,55 @@ export function useQuizSession(): UseQuizSessionReturn {
     count: number,
     currentUser: User,
     currentUserPassword: string,
+    isTriviaMode: boolean,
     options?: BlendedQuizOptions
   ): Promise<void> {
     if (!state.activeRoomId) {
       throw new Error('Nenhuma sala ativa selecionada para iniciar o quiz.');
     }
-    await startLlmQuiz(topic, difficulty, count, currentUser, currentUserPassword, state.activeRoomId, options);
+    if (isTriviaMode) {
+      const [categoryId, areaIdsStr] = topic.includes('|') ? topic.split('|') : [topic, undefined];
+      const areaIds = areaIdsStr ? areaIdsStr.split(',') : undefined;
+
+      const triviaBankQuestions = await multiSourceTriviaService.fetchQuestionsForCategory(
+        categoryId,
+        areaIds,
+        difficulty,
+        count
+      );
+
+      if (triviaBankQuestions.length === 0) {
+        throw new Error('Nenhuma questão encontrada para esta categoria. Tente outra.');
+      }
+
+      const convertedQuestions: QuizQuestion[] = await Promise.all(
+        triviaBankQuestions.map(async (tbq) => {
+          const questionText =
+            typeof tbq.text === 'string' ? tbq.text : String(tbq.text);
+          const explanation =
+            typeof tbq.explanation === 'string' ? tbq.explanation : 'Resposta correta acima.';
+
+          const [translatedQuestion, ...translatedOptions] = await Promise.all([
+            translateText(questionText),
+            ...((tbq.options as string[]) || []).map((opt) => translateText(opt)),
+          ]);
+
+          return {
+            id: tbq.id,
+            questionText: translatedQuestion || questionText,
+            options: translatedOptions.length > 0 ? translatedOptions : (tbq.options as string[]),
+            correctOptionIndex: tbq.correctIndex ?? 0,
+            explanation: explanation,
+          };
+        })
+      );
+
+      const fullTopic = `Multi-Banco: ${categoryId}`;
+      const qId = await roomService.startRoomQuiz(state.activeRoomId, fullTopic, difficulty, convertedQuestions);
+      applyQuizStart(convertedQuestions, fullTopic, difficulty, qId, state.activeRoomId);
+    } else {
+      await startLlmQuiz(topic, difficulty, count, currentUser, currentUserPassword, state.activeRoomId, options);
+    }
   }
 
   function handleAnswerSelected(
@@ -304,6 +351,15 @@ export function useQuizSession(): UseQuizSessionReturn {
       state.correctAnswersMap,
       state.answersList
     );
+
+    // Se for um quiz de sala, finaliza o status de quiz ativo na sala no banco de dados
+    if (state.activeRoomId) {
+      try {
+        await roomService.endRoomQuiz(state.activeRoomId);
+      } catch (err) {
+        console.warn('[QuizSession] Não foi possível limpar o quiz ativo na sala (provavelmente você não é o líder/dono):', err);
+      }
+    }
 
     return 'finished';
   }

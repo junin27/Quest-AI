@@ -45,7 +45,7 @@ export class AuthService {
   async login(input: LoginInput): Promise<{
     success: boolean;
     token: string;
-    user: { id: string; email: string; name: string; emailVerified: boolean };
+    user: { id: string; email: string; name: string; emailVerified: boolean; apiKey?: ApiKeyInfo; createdAt?: string };
   }> {
     const { data, error } = await supabase.auth.signInWithPassword({
       email: input.email.toLowerCase().trim(),
@@ -59,7 +59,7 @@ export class AuthService {
     // Obter dados do perfil complementar
     const { data: profile } = await supabase
       .from('profiles')
-      .select('name')
+      .select('*')
       .eq('id', data.user.id)
       .single();
 
@@ -71,6 +71,8 @@ export class AuthService {
         email: data.user.email || '',
         name: profile?.name || data.user.user_metadata?.name || 'Participante',
         emailVerified: !!data.user.email_confirmed_at,
+        apiKey: profile?.api_key || undefined,
+        createdAt: profile?.created_at || new Date().toISOString(),
       },
     };
   }
@@ -99,7 +101,7 @@ export class AuthService {
   async loginFair(name?: string, email?: string): Promise<{
     success: boolean;
     token: string;
-    user: { id: string; email: string; name: string; emailVerified: boolean };
+    user: { id: string; email: string; name: string; emailVerified: boolean; apiKey?: ApiKeyInfo; createdAt?: string };
   }> {
     const finalName = name?.trim() || 'Jogador não informado';
     const finalEmail = email?.trim().toLowerCase() || `guest_${Math.random().toString(36).substring(2, 9)}@feira.local`;
@@ -118,7 +120,7 @@ export class AuthService {
 
       const { data: profile } = await supabase
         .from('profiles')
-        .select('name')
+        .select('*')
         .eq('id', data.user.id)
         .single();
 
@@ -130,6 +132,8 @@ export class AuthService {
           email: data.user.email || '',
           name: profile?.name || finalName,
           emailVerified: true,
+          apiKey: profile?.api_key || undefined,
+          createdAt: profile?.created_at || new Date().toISOString(),
         },
       };
     } catch {
@@ -167,6 +171,13 @@ export class AuthService {
           .eq('id', data.user.id);
       }
 
+      // Obter dados do perfil complementar recém criado
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', data.user.id)
+        .single();
+
       return {
         success: true,
         token: data.session.access_token,
@@ -175,6 +186,8 @@ export class AuthService {
           email: data.user.email || '',
           name: finalName,
           emailVerified: true,
+          apiKey: profile?.api_key || undefined,
+          createdAt: profile?.created_at || new Date().toISOString(),
         },
       };
     }

@@ -42,6 +42,7 @@ model Quiz {
 model Room {
   id           String   @id @default(uuid()) @db.Uuid
   code         String   @unique
+  name         String?
   ownerId      String   @map("owner_id") @db.Uuid
   maxGuests    Int      @default(50) @map("max_guests")
   activeQuizId String?  @map("active_quiz_id") @db.Uuid
@@ -62,6 +63,7 @@ model RoomMember {
   userId   String   @map("user_id") @db.Uuid
   role     String   @default("member") // "owner", "leader", "member"
   status   String   @default("active") // "active", "absent"
+  isReady  Boolean  @default(false) @map("is_ready")
   joinedAt DateTime @default(now()) @map("joined_at") @db.Timestamptz
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 

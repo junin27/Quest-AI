@@ -1,6 +1,6 @@
 import React from 'react';
 import type { RoomMember } from '../../types/quiz.types';
-import { Shield, Star, Ban, Moon, Sun, Award } from 'lucide-react';
+import { Shield, Star, Ban, Moon, Sun, Award, Check } from 'lucide-react';
 
 interface RoomMembersListProps {
   members: RoomMember[];
@@ -108,6 +108,18 @@ export const RoomMembersList: React.FC<RoomMembersListProps> = ({
                       <span className="bg-slate-900 text-slate-500 border border-slate-800 px-2 py-0.5 rounded-md text-[9px] font-extrabold uppercase">
                         Ausente
                       </span>
+                    )}
+                    {!isTargetOwner && (
+                      member.isReady ? (
+                        <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-md text-[9px] font-extrabold flex items-center gap-0.5 tracking-wider uppercase">
+                          <Check size={9} strokeWidth={3} />
+                          Pronto
+                        </span>
+                      ) : (
+                        <span className="bg-slate-900 text-slate-500 border border-slate-800/80 px-2 py-0.5 rounded-md text-[9px] font-extrabold uppercase">
+                          Aguardando
+                        </span>
+                      )
                     )}
                   </div>
                   <p className="text-[10px] text-slate-500 truncate">{member.email}</p>

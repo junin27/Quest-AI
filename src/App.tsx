@@ -19,6 +19,7 @@ import { UserProfile } from './components/Auth/UserProfile';
 import { Header } from './components/Common/Header';
 import { AuthLayout } from './components/Auth/AuthLayout';
 import { RoomDashboard } from './components/Room/RoomDashboard';
+import { roomService } from './services/roomService';
 
 /**
  * Retorna true apenas quando o usuário tem uma chave de API real configurada
@@ -54,6 +55,8 @@ export const App: React.FC = () => {
     isVisible: false,
   });
 
+  const [pendingRoomCode, setPendingRoomCode] = useState<string | null>(null);
+
   const quizSession = useQuizSession();
 
   // ─── Toast ────────────────────────────────────────────────────────────────────
@@ -77,7 +80,15 @@ export const App: React.FC = () => {
           setCurrentUserPassword('FairModePassword123!');
         }
         setIsTriviaMode(!hasRealApiKey(user));
-        setView(resolvePostLoginView(user));
+        
+        const params = new URLSearchParams(window.location.search);
+        const roomCode = params.get('room');
+        if (roomCode) {
+          setPendingRoomCode(roomCode);
+          setView('rooms');
+        } else {
+          setView(resolvePostLoginView(user));
+        }
       }
     };
     tryAutoLogin();
@@ -88,8 +99,16 @@ export const App: React.FC = () => {
     const params = new URLSearchParams(window.location.search);
     const roomCode = params.get('room');
     if (roomCode && currentUser) {
+      setPendingRoomCode(roomCode);
       setView('rooms');
       window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, [currentUser]);
+
+  // Pre-fetch de salas ativas em segundo plano ao autenticar o usuário
+  useEffect(() => {
+    if (currentUser) {
+      roomService.getUserRooms().catch(() => {});
     }
   }, [currentUser]);
 
@@ -128,7 +147,13 @@ export const App: React.FC = () => {
     setIsTriviaMode(!hasRealApiKey(user));
 
     const params = new URLSearchParams(window.location.search);
-    setView(params.get('room') ? 'rooms' : resolvePostLoginView(user));
+    const roomCode = params.get('room');
+    if (roomCode) {
+      setPendingRoomCode(roomCode);
+      setView('rooms');
+    } else {
+      setView(resolvePostLoginView(user));
+    }
   };
 
   const handleRegisterSuccess = (userId: string, email: string) => {
@@ -149,6 +174,7 @@ export const App: React.FC = () => {
 
   const handleLogout = () => {
     authService.logout();
+    roomService.clearCache();
     setCurrentUser(null);
     setCurrentUserPassword('');
     quizSession.resetQuizState();
@@ -247,9 +273,22 @@ export const App: React.FC = () => {
   ) => {
     if (!currentUser || !quizSession.activeRoomId) return;
     setIsLoading(true);
-    setLoadingMsg('Gerando questões por IA para a sala...');
+    const isTrivia = !options;
+    setLoadingMsg(
+      isTrivia
+        ? 'Buscando questões do banco de dados para a sala...'
+        : 'Gerando questões por IA para a sala...'
+    );
     try {
-      await quizSession.startRoomQuiz(topic, difficulty, count, currentUser, currentUserPassword, options);
+      await quizSession.startRoomQuiz(
+        topic,
+        difficulty,
+        count,
+        currentUser,
+        currentUserPassword,
+        isTrivia,
+        options
+      );
       setView('quiz');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Erro ao iniciar o quiz na sala.';
@@ -318,15 +357,34 @@ export const App: React.FC = () => {
                   />
                 )}
                 {view === 'quiz' && quizSession.quizQuestions.length > 0 && (
-                  <QuestionCard
-                    question={quizSession.quizQuestions[quizSession.currentQuestionIndex]}
-                    questionNumber={quizSession.currentQuestionIndex + 1}
-                    totalQuestions={quizSession.quizQuestions.length}
-                    difficulty={quizSession.quizDifficulty}
-                    onAnswerSelected={handleAnswerSelected}
-                    onNextQuestion={handleNextQuestion}
-                    isLastQuestion={quizSession.currentQuestionIndex + 1 === quizSession.quizQuestions.length}
-                  />
+                  <div className="space-y-4 w-full max-w-2xl mx-auto">
+                    <div className="flex justify-start px-2">
+                      <button
+                        onClick={() => {
+                          if (confirm('Deseja realmente sair do quiz em andamento? Seu progresso será perdido.')) {
+                            quizSession.resetQuizState();
+                            setView(quizSession.activeRoomId ? 'rooms' : 'quiz-setup');
+                          }
+                        }}
+                        className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-900/60 hover:bg-slate-800/80 border border-slate-800/80 hover:border-slate-700 rounded-xl text-xs text-slate-400 hover:text-white font-bold transition-all transform active:scale-95 shadow-lg backdrop-blur-md"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                          <polyline points="15 18 9 12 15 6" />
+                        </svg>
+                        <span>Sair do Quiz</span>
+                      </button>
+                    </div>
+
+                    <QuestionCard
+                      question={quizSession.quizQuestions[quizSession.currentQuestionIndex]}
+                      questionNumber={quizSession.currentQuestionIndex + 1}
+                      totalQuestions={quizSession.quizQuestions.length}
+                      difficulty={quizSession.quizDifficulty}
+                      onAnswerSelected={handleAnswerSelected}
+                      onNextQuestion={handleNextQuestion}
+                      isLastQuestion={quizSession.currentQuestionIndex + 1 === quizSession.quizQuestions.length}
+                    />
+                  </div>
                 )}
                 {view === 'scores' && currentUser && (
                   <ScoreBoard
@@ -344,6 +402,8 @@ export const App: React.FC = () => {
                     isIAActive={hasRealApiKey(currentUser)}
                     onNavigateToApiSetup={() => setView('api-key-setup')}
                     isLoadingIAQuiz={isLoading}
+                    initialRoomCode={pendingRoomCode}
+                    onClearInitialRoomCode={() => setPendingRoomCode(null)}
                   />
                 )}
               </>

@@ -26,10 +26,12 @@ export function handleRateLimit(req: IncomingMessage, res: ServerResponse): bool
              (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() || 
              '127.0.0.1';
 
+  console.log(`[RateLimit] Checking IP "${ip}" for path "${req.url}"`);
   const now = Date.now();
 
   // Limpeza de cache passiva para evitar vazamento de memória em containers warm
   if (cache.size > 2000) {
+    console.log('[RateLimit] Cleaning passive cache. Cache size:', cache.size);
     for (const [key, value] of cache.entries()) {
       if (now > value.resetTime) {
         cache.delete(key);
@@ -44,18 +46,22 @@ export function handleRateLimit(req: IncomingMessage, res: ServerResponse): bool
       count: 1,
       resetTime: now + WINDOW_MS
     });
+    console.log(`[RateLimit] IP "${ip}" new entry. Count: 1`);
     return false;
   }
 
   if (now > info.resetTime) {
     info.count = 1;
     info.resetTime = now + WINDOW_MS;
+    console.log(`[RateLimit] IP "${ip}" reset window. Count: 1`);
     return false;
   }
 
   info.count++;
+  console.log(`[RateLimit] IP "${ip}" count updated: ${info.count}/${MAX_REQUESTS}`);
 
   if (info.count > MAX_REQUESTS) {
+    console.error(`[RateLimit] BLOCKED IP "${ip}". Request count: ${info.count}/${MAX_REQUESTS}`);
     res.writeHead(429, {
       'Content-Type': 'application/json',
       'Retry-After': Math.ceil((info.resetTime - now) / 1000).toString()

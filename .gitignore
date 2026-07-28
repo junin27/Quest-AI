@@ -38,6 +38,8 @@ dist-ssr
 # Agent & IDE directories
 .claude/
 .gemini/
+CLAUDE.MD
+MULTI_SOURCE_TRIVIA_IMPLEMENTATION.md
 
 # Temporary unpacked PowerPoint folders
 unpacked/

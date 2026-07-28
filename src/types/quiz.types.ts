@@ -78,6 +78,7 @@ export interface LeaderboardEntry {
 export interface Room {
   id: string;
   code: string;
+  name?: string | null;
   ownerId: string;
   maxGuests: number;
   activeQuizId: string | null;
@@ -91,6 +92,7 @@ export interface RoomMember {
   email: string;
   role: 'owner' | 'leader' | 'member';
   status: 'active' | 'absent';
+  isReady: boolean;
   joinedAt: string;
 }
 

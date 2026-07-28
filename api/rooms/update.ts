@@ -27,24 +27,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // Parse body
-  const { code } = req.body || {};
-  if (!code) {
+  const { roomId, name } = req.body || {};
+  if (!roomId) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Código da sala obrigatório.' }));
+    res.end(JSON.stringify({ error: 'ID da sala é obrigatório.' }));
     return;
   }
 
   try {
+    // 1. Validar token
     const userId = await validateToken(req.headers.authorization);
 
-    // 1. Achar a sala ativa
+    // 2. Verificar se a sala existe
     const room = await prisma.room.findFirst({
       where: {
-        code: code.trim().toUpperCase(),
+        id: roomId,
         expiresAt: { gt: new Date() }
-      },
-      include: {
-        members: true
       }
     });
 
@@ -54,48 +52,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-    // 2. Verificar lotação (máx 50 convidados)
-    const guestsCount = room.members.filter((m: any) => m.role !== 'owner').length;
-    const isAlreadyMember = room.members.some((m: any) => m.userId === userId);
-
-    if (guestsCount >= 50 && !isAlreadyMember) {
-      res.writeHead(400, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'A sala atingiu o limite de 50 convidados.' }));
+    // 3. Apenas o dono pode atualizar o nome
+    if (room.ownerId !== userId) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Apenas o dono da sala pode alterar o nome.' }));
       return;
     }
 
-    // 3. Upsert do membro
-    await prisma.roomMember.upsert({
+    // 4. Atualizar o nome da sala
+    const updatedRoom = await prisma.room.update({
       where: {
-        roomId_userId: {
-          roomId: room.id,
-          userId
-        }
+        id: roomId
       },
-      create: {
-        roomId: room.id,
-        userId,
-        role: 'member',
-        status: 'active'
-      },
-      update: {
-        status: 'active' // Reativa se estiver ausente
+      data: {
+        name: name ? String(name).trim() : null
       }
     });
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
-      id: room.id,
-      code: room.code,
-      name: room.name,
-      ownerId: room.ownerId,
-      maxGuests: room.maxGuests,
-      activeQuizId: room.activeQuizId,
-      createdAt: room.createdAt,
-      expiresAt: room.expiresAt
+      id: updatedRoom.id,
+      code: updatedRoom.code,
+      name: updatedRoom.name,
+      ownerId: updatedRoom.ownerId,
+      maxGuests: updatedRoom.maxGuests,
+      activeQuizId: updatedRoom.activeQuizId,
+      createdAt: updatedRoom.createdAt,
+      expiresAt: updatedRoom.expiresAt
     }));
   } catch (err: any) {
     res.writeHead(400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: err.message || 'Erro ao entrar na sala.' }));
+    res.end(JSON.stringify({ error: err.message || 'Erro ao atualizar dados da sala.' }));
   }
 }

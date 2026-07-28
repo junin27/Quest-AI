@@ -1,6 +1,5 @@
 import type { User } from '../types/user.types';
 import type { Score } from '../types/quiz.types';
-import type { AdminLog } from '../types/storage.types';
 
 export interface SessionData {
   currentUserId: string | null;
@@ -12,7 +11,6 @@ export interface StorageSchema {
   quiz_app_users: Record<string, User>;
   quiz_app_scores: Record<string, Score>;
   quiz_app_session: SessionData;
-  quiz_app_admin_logs: AdminLog[];
   quiz_app_archived_scores: Array<Score & { archived: boolean; archivedAt: string }>;
 }
 
@@ -27,7 +25,6 @@ export class SessionStore {
       token: null,
       tokenExpiresAt: null
     },
-    quiz_app_admin_logs: [],
     quiz_app_archived_scores: []
   };
 
@@ -99,28 +96,6 @@ export class SessionStore {
     this.saveSchema();
   }
 
-  archiveScores(): void {
-    const activeScores = Object.values(this.schema.quiz_app_scores);
-    const nowStr = new Date().toISOString();
-    const archived = activeScores.map(score => ({
-      ...score,
-      archived: true,
-      archivedAt: nowStr
-    }));
-    this.schema.quiz_app_archived_scores.push(...archived);
-    this.schema.quiz_app_scores = {};
-    this.saveSchema();
-  }
-
-  addAdminLog(log: AdminLog): void {
-    this.schema.quiz_app_admin_logs.push(log);
-    this.saveSchema();
-  }
-
-  getAdminLogs(): AdminLog[] {
-    return this.schema.quiz_app_admin_logs;
-  }
-
   clearUserScores(userId: string): void {
     const remainingScores: Record<string, Score> = {};
     for (const [id, score] of Object.entries(this.schema.quiz_app_scores)) {
@@ -141,7 +116,6 @@ export class SessionStore {
         token: null,
         tokenExpiresAt: null
       },
-      quiz_app_admin_logs: [],
       quiz_app_archived_scores: []
     };
     this.saveSchema();

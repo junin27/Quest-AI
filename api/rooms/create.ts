@@ -39,7 +39,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 1. Validar token
     const ownerId = await validateToken(req.headers.authorization);
 
-    // 2. Tentar inserir e gerar um código único
+    // 2. Validar limite de 10 salas por usuário (apenas salas ativas/não expiradas)
+    const activeRoomsCount = await prisma.room.count({
+      where: {
+        ownerId,
+        expiresAt: { gt: new Date() }
+      }
+    });
+
+    if (activeRoomsCount >= 10) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Você atingiu o limite de 10 salas ativas.' }));
+      return;
+    }
+
+    // 3. Obter nome da sala
+    const { name } = req.body || {};
+
+    // 4. Tentar inserir e gerar um código único
     let room = null;
     let attempts = 0;
     while (!room && attempts < 5) {
@@ -48,6 +65,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         room = await prisma.room.create({
           data: {
             code,
+            name: name ? String(name).trim() : null,
             ownerId,
             members: {
               create: {

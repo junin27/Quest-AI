@@ -2,8 +2,47 @@ import { getAuthHeader } from '../lib/authHeader';
 import type { Room, RoomMember, RoomStats, QuizQuestion } from '../types/quiz.types';
 
 export class RoomService {
+  private cachedUserRooms: Room[] | null = null;
+  private readonly CACHE_KEY = 'quiz_app_cached_rooms';
+
+  /** Retorna a lista de salas do cache */
+  getCachedUserRooms(): Room[] | null {
+    if (this.cachedUserRooms) return this.cachedUserRooms;
+
+    try {
+      const stored = localStorage.getItem(this.CACHE_KEY);
+      if (stored) {
+        this.cachedUserRooms = JSON.parse(stored);
+        return this.cachedUserRooms;
+      }
+    } catch (e) {
+      console.warn('Erro ao ler cache de salas do localStorage:', e);
+    }
+    return null;
+  }
+
+  /** Atualiza o cache local e o sincroniza com o localStorage */
+  setCachedUserRooms(rooms: Room[]): void {
+    this.cachedUserRooms = rooms;
+    try {
+      localStorage.setItem(this.CACHE_KEY, JSON.stringify(rooms));
+    } catch (e) {
+      console.warn('Erro ao salvar cache de salas no localStorage:', e);
+    }
+  }
+
+  /** Limpa o cache local e do localStorage (chamado no logout) */
+  clearCache(): void {
+    this.cachedUserRooms = null;
+    try {
+      localStorage.removeItem(this.CACHE_KEY);
+    } catch (e) {
+      console.warn('Erro ao limpar cache de salas do localStorage:', e);
+    }
+  }
+
   /** Cria uma sala de quiz */
-  async createRoom(): Promise<Room> {
+  async createRoom(name?: string): Promise<Room> {
     const authHeader = await getAuthHeader();
     const response = await fetch('/api/rooms/create', {
       method: 'POST',
@@ -11,6 +50,7 @@ export class RoomService {
         'Content-Type': 'application/json',
         ...authHeader,
       },
+      body: JSON.stringify({ name }),
     });
 
     if (!response.ok) {
@@ -18,7 +58,37 @@ export class RoomService {
       throw new Error(errData.error || 'Falha ao criar sala de quiz.');
     }
 
-    return response.json();
+    const room = await response.json();
+    const current = this.getCachedUserRooms() || [];
+    this.setCachedUserRooms([room, ...current]);
+    return room;
+  }
+
+  /** Atualiza o nome de uma sala */
+  async updateRoomName(roomId: string, name: string): Promise<Room> {
+    const authHeader = await getAuthHeader();
+    const response = await fetch('/api/rooms/update', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeader,
+      },
+      body: JSON.stringify({ roomId, name }),
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.error || 'Falha ao renomear sala.');
+    }
+
+    const room = await response.json();
+    const current = this.getCachedUserRooms();
+    if (current) {
+      this.setCachedUserRooms(
+        current.map((r) => (r.id === roomId ? { ...r, name: room.name } : r))
+      );
+    }
+    return room;
   }
 
   /** Entra em uma sala por meio do código */
@@ -38,7 +108,10 @@ export class RoomService {
       throw new Error(errData.error || 'Falha ao entrar na sala.');
     }
 
-    return response.json();
+    const room = await response.json();
+    const current = this.getCachedUserRooms() || [];
+    this.setCachedUserRooms([room, ...current]);
+    return room;
   }
 
   /** Retorna a sala ativa por ID */
@@ -126,6 +199,33 @@ export class RoomService {
     }
   }
 
+  /** Altera o status de pronto (isReady) do próprio membro na sala */
+  async updateMemberReady(
+    roomId: string,
+    targetUserId: string,
+    isReady: boolean
+  ): Promise<void> {
+    const authHeader = await getAuthHeader();
+    const response = await fetch('/api/rooms/members', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeader,
+      },
+      body: JSON.stringify({
+        action: 'ready',
+        roomId,
+        targetUserId,
+        isReady,
+      }),
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.error || 'Falha ao alterar status de pronto.');
+    }
+  }
+
   /** Expulsa/Kick de um membro da sala */
   async kickMember(roomId: string, targetUserId: string, actingUserId: string): Promise<void> {
     const authHeader = await getAuthHeader();
@@ -146,6 +246,13 @@ export class RoomService {
     if (!response.ok) {
       const errData = await response.json().catch(() => ({}));
       throw new Error(errData.error || 'Falha ao processar saída/expulsão.');
+    }
+
+    if (actingUserId === targetUserId) {
+      const current = this.getCachedUserRooms();
+      if (current) {
+        this.setCachedUserRooms(current.filter((r) => r.id !== roomId));
+      }
     }
   }
 
@@ -231,7 +338,9 @@ export class RoomService {
       throw new Error(errData.error || 'Erro ao obter salas do usuário.');
     }
 
-    return response.json();
+    const rooms = await response.json();
+    this.setCachedUserRooms(rooms);
+    return rooms;
   }
 }
 

@@ -1,5 +1,4 @@
 import { BaseTriviaBankProvider } from './baseProvider';
-import { translateText } from '../translationService';
 import { mapDifficultyScaleToNumber } from '../triviaService';
 import type {
   TriviaBankCategory,
@@ -44,6 +43,46 @@ const CATEGORY_MAP: Record<string, string> = {
   'General Knowledge': 'general',
   'Food & Drink': 'food',
   'Society & Culture': 'society',
+};
+
+const STATIC_AREAS: Record<string, string[]> = {
+  'science': [
+    'Anatomia', 'Medicina', 'Biologia', 'Física', 'Química', 
+    'Espaço', 'Astronomia', 'Astrofísica', 'Materiais', 'Sistema Solar', 'Doenças'
+  ],
+  'history': [
+    'Eventos Históricos', 'Primeiros Feitos', 'Medicina', 'História', 'França',
+    'Presidentes', 'Líderes', 'Política', 'Europa', 'Rússia', 'Suécia', 'Império Otomano', 'Século XVIII', 'China'
+  ],
+  'geography': [
+    'Continentes', 'Estados dos EUA', 'Fronteiras', 'México', 'Geografia',
+    'Apelidos', 'Vizinhos', 'Cidades', 'Internet', 'EUA', 'Capitais'
+  ],
+  'music': [
+    'Álbuns de Música', 'Músicas', 'Anos 1960', 'Bandas', 'Música',
+    'Pseudônimos', 'Orquestra', 'Instrumentos', 'Músicos', 'Letras de Música'
+  ],
+  'film': [
+    'Cinema e TV', 'Filmes', 'Atuação', 'Conhecimento Geral', 'James Bond',
+    'Prêmios Oscar', 'Programas de TV', 'Personagens Fictícios', 'Citações de Filmes'
+  ],
+  'sport': [
+    'Esporte Geral', 'Sinuca', 'Cores no Esporte', 'Jogos', 'Basquete', 'NBA'
+  ],
+  'arts': [
+    'Artes e Literatura', 'Contos de Fadas', 'Romances Clássicos', 'Literatura',
+    'Construções Famosas', 'Disney', 'Arquitetura'
+  ],
+  'general': [
+    'Conhecimento Geral', 'Variados'
+  ],
+  'food': [
+    'Comida', 'Frases sobre Culinária', 'Frutos do Mar', 'Idioma', 'Comidas e Bebidas',
+    'Presidentes', 'Molhos', 'Alemanha', 'Culinária', 'França', 'Bebidas', 'Vinho', 'Itália', 'Álcool', 'Gírias'
+  ],
+  'society': [
+    'Sociedade e Cultura', 'Cristianismo', 'Filosofia'
+  ]
 };
 
 export class TheTriviaApiProvider extends BaseTriviaBankProvider {
@@ -129,44 +168,16 @@ export class TheTriviaApiProvider extends BaseTriviaBankProvider {
     }
 
     const categoryParam = CATEGORY_MAP[categoryName] || categoryName.toLowerCase();
+    const areaNames = STATIC_AREAS[categoryParam] || [];
 
-    try {
-      const url = `https://the-trivia-api.com/v2/questions?categories=${categoryParam}&limit=100`;
-      const response = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    const areas = areaNames.map((name, index) => ({
+      id: `theTriviaApi_area_${categoryName}_${index}`,
+      name: name,
+      provider: this.providerName,
+    }));
 
-      if (!response.ok) {
-        this.areasCache.set(cacheKey, []);
-        return [];
-      }
-
-      const data = (await response.json()) as TheTriviaApiQuestion[];
-      const tagSet = new Set<string>();
-
-      data.forEach((q) => {
-        if (q.tags && Array.isArray(q.tags)) {
-          q.tags.forEach((tag) => tagSet.add(tag));
-        }
-      });
-
-      const tagArray = Array.from(tagSet).slice(0, 10);
-
-      // Traduzir tags para português
-      const translatedTags = await Promise.all(
-        tagArray.map((tag) => translateText(tag))
-      );
-
-      const areas = translatedTags.map((translatedTag, index) => ({
-        id: `theTriviaApi_area_${categoryName}_${index}`,
-        name: translatedTag.charAt(0).toUpperCase() + translatedTag.slice(1),
-        provider: this.providerName,
-      }));
-
-      this.areasCache.set(cacheKey, areas);
-      return areas;
-    } catch {
-      this.areasCache.set(cacheKey, []);
-      return [];
-    }
+    this.areasCache.set(cacheKey, areas);
+    return areas;
   }
 
   private extractAreaName(tags: string[]): string {

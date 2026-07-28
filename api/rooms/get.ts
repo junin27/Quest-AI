@@ -56,6 +56,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.end(JSON.stringify({
       id: room.id,
       code: room.code,
+      name: room.name,
       ownerId: room.ownerId,
       maxGuests: room.maxGuests,
       activeQuizId: room.activeQuizId,

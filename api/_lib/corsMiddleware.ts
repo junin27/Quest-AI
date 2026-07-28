@@ -6,13 +6,27 @@ import type { IncomingMessage, ServerResponse } from 'http';
  */
 export function handleCors(req: IncomingMessage, res: ServerResponse): boolean {
   const origin = req.headers.origin || '';
+  console.log(`[CORS] Request Origin: "${origin}"`);
   
-  // Obter origens permitidas estritamente da variável de ambiente
-  const allowedOrigins = process.env.ALLOWED_ORIGINS
+  // Obter origens permitidas da variável de ambiente
+  let allowedOrigins = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
     : [];
 
-  if (origin && allowedOrigins.includes(origin)) {
+  // Fallback para desenvolvimento local caso ALLOWED_ORIGINS não esteja no .env
+  if (process.env.NODE_ENV !== 'production' || !process.env.ALLOWED_ORIGINS) {
+    const localDevOrigins = [
+      'http://localhost:5173', 'http://127.0.0.1:5173',
+      'http://localhost:3000', 'http://127.0.0.1:3000'
+    ];
+    allowedOrigins = [...allowedOrigins, ...localDevOrigins];
+  }
+  console.log('[CORS] Allowed Origins List:', allowedOrigins);
+
+  const isAllowed = origin && allowedOrigins.includes(origin);
+  console.log(`[CORS] Origin is ${isAllowed ? 'ALLOWED' : 'BLOCKED'}`);
+
+  if (isAllowed) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
   }

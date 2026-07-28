@@ -29,6 +29,8 @@ interface QuizSetupProps {
   isLoading: boolean;
   isTriviaMode?: boolean;
   onNavigateToApiSetup?: () => void;
+  isIAActive?: boolean;
+  showModeToggle?: boolean;
 }
 
 export const QuizSetup: React.FC<QuizSetupProps> = ({
@@ -36,8 +38,16 @@ export const QuizSetup: React.FC<QuizSetupProps> = ({
   isLoading,
   isTriviaMode = false,
   onNavigateToApiSetup,
+  isIAActive = true,
+  showModeToggle = false,
 }) => {
   const triviaData = useMultiSourceTrivia();
+  const [localTriviaMode, setLocalTriviaMode] = useState<boolean>(isTriviaMode);
+
+  React.useEffect(() => {
+    setLocalTriviaMode(isTriviaMode);
+  }, [isTriviaMode]);
+
   const [topic, setTopic] = useState<string>('');
   const [difficulty, setDifficulty] = useState<DifficultyLevel>('5');
   const [count, setCount] = useState<number>(5);
@@ -152,18 +162,33 @@ export const QuizSetup: React.FC<QuizSetupProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isTriviaMode) {
-      handleStartLlmQuiz(topic.trim());
+    if (!localTriviaMode && !isIAActive) {
+      showLocalToast('Adicione uma chave de API de IA em suas credenciais para poder usar a geração por inteligência artificial.', 'error');
       return;
     }
 
-    if (!triviaData.selectedCategory) return;
+    if (localTriviaMode) {
+      if (!triviaData.selectedCategory) {
+        showLocalToast('Por favor, selecione uma categoria do banco de dados.', 'error');
+        return;
+      }
 
-    const categoryAndAreas = triviaData.selectedAreaIds.length > 0
-      ? `${triviaData.selectedCategory.id}|${triviaData.selectedAreaIds.join(',')}`
-      : triviaData.selectedCategory.id;
+      const categoryAndAreas = triviaData.selectedAreaIds.length > 0
+        ? `${triviaData.selectedCategory.id}|${triviaData.selectedAreaIds.join(',')}`
+        : triviaData.selectedCategory.id;
 
-    onStartQuiz(categoryAndAreas, difficulty, count);
+      onStartQuiz(categoryAndAreas, difficulty, count);
+    } else {
+      handleStartLlmQuiz(topic.trim());
+    }
+  };
+
+  const onToggleModelLocal = (modelKey: 'ia' | 'rag' | 'exam') => {
+    if (!isIAActive) {
+      showLocalToast('Configure uma chave de API de IA em suas credenciais para liberar as opções de IA.', 'error');
+      return;
+    }
+    handleToggleModel(modelKey);
   };
 
   const handleCategorySelect = (categoryId: string) => {
@@ -183,7 +208,39 @@ export const QuizSetup: React.FC<QuizSetupProps> = ({
       <h2 className="text-2xl font-extrabold text-white text-center mb-6">Iniciar Novo Quiz</h2>
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {isTriviaMode && (
+        {showModeToggle && (
+          <div className="flex bg-slate-950/40 p-1 rounded-xl border border-slate-800 mb-6">
+            <button
+              type="button"
+              onClick={() => setLocalTriviaMode(true)}
+              className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
+                localTriviaMode
+                  ? 'bg-rose-500 text-white shadow-md'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              Temas do Banco de Dados
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!isIAActive) {
+                  showLocalToast('Você precisa configurar uma chave de API de IA para usar as opções de geração por Inteligência Artificial.', 'error');
+                }
+                setLocalTriviaMode(false);
+              }}
+              className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
+                !localTriviaMode
+                  ? 'bg-rose-500 text-white shadow-md'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              Gerado por IA
+            </button>
+          </div>
+        )}
+
+        {localTriviaMode && (
           <div className="flex items-start gap-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl">
             <AlertTriangle size={16} className="text-amber-400 mt-0.5 shrink-0" />
             <div className="text-xs text-amber-300 leading-relaxed">
@@ -206,7 +263,7 @@ export const QuizSetup: React.FC<QuizSetupProps> = ({
           </div>
         )}
 
-        {isTriviaMode ? (
+        {localTriviaMode ? (
           <div className="space-y-4">
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
@@ -316,9 +373,15 @@ export const QuizSetup: React.FC<QuizSetupProps> = ({
               </label>
               <input
                 type="text"
-                required={!isRagActive}
+                required={!isRagActive && !localTriviaMode}
                 value={topic}
-                onChange={(e) => setTopic(e.target.value)}
+                onChange={(e) => {
+                  if (!isIAActive) {
+                    showLocalToast('Configure uma chave de API de IA em suas credenciais para definir temas de IA.', 'error');
+                    return;
+                  }
+                  setTopic(e.target.value);
+                }}
                 placeholder={isRagActive
                   ? "Ex: Focar em fórmulas específicas, focar na introdução..."
                   : "Ex: Astrofísica, Marvel, Mitologia Nórdica..."
@@ -399,7 +462,7 @@ export const QuizSetup: React.FC<QuizSetupProps> = ({
           )}
         </div>
 
-        {!isTriviaMode && (
+        {!localTriviaMode && (
           <div className="space-y-4">
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
               Elaboração das Questões
@@ -422,7 +485,7 @@ export const QuizSetup: React.FC<QuizSetupProps> = ({
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleToggleModel('ia')}
+                    onClick={() => onToggleModelLocal('ia')}
                     className={`w-9 h-5 rounded-full transition-all relative ${activeModels.ia ? 'bg-rose-500' : 'bg-slate-800'}`}
                   >
                     <span className={`block w-4 h-4 rounded-full bg-white absolute top-0.5 left-0.5 transition-all ${activeModels.ia ? 'translate-x-4' : 'translate-x-0'}`} />
@@ -442,7 +505,7 @@ export const QuizSetup: React.FC<QuizSetupProps> = ({
                   </div>
                 )}
               </div>
-
+ 
               <div className="space-y-2 border-b border-slate-800/40 pb-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2.5">
@@ -458,7 +521,7 @@ export const QuizSetup: React.FC<QuizSetupProps> = ({
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleToggleModel('rag')}
+                    onClick={() => onToggleModelLocal('rag')}
                     className={`w-9 h-5 rounded-full transition-all relative ${activeModels.rag ? 'bg-rose-500' : 'bg-slate-800'}`}
                   >
                     <span className={`block w-4 h-4 rounded-full bg-white absolute top-0.5 left-0.5 transition-all ${activeModels.rag ? 'translate-x-4' : 'translate-x-0'}`} />
@@ -477,14 +540,29 @@ export const QuizSetup: React.FC<QuizSetupProps> = ({
                     <span className="text-xs font-mono font-bold text-rose-400 w-10 text-right">{percentages.rag}%</span>
                   </div>
                 )}
-
+ 
                 {activeModels.rag && (
                   <div className="pl-8 pt-2 space-y-3">
                     <div
                       onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
                       onDragLeave={() => setIsDragging(false)}
-                      onDrop={(e) => { e.preventDefault(); setIsDragging(false); handleFileChange(e.dataTransfer.files); }}
-                      onClick={() => document.getElementById('rag-file-input')?.click()}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        if (!isIAActive) {
+                          showLocalToast('Configure uma chave de API de IA em suas credenciais para usar RAG.', 'error');
+                          setIsDragging(false);
+                          return;
+                        }
+                        setIsDragging(false);
+                        handleFileChange(e.dataTransfer.files);
+                      }}
+                      onClick={() => {
+                        if (!isIAActive) {
+                          showLocalToast('Configure uma chave de API de IA em suas credenciais para usar RAG.', 'error');
+                          return;
+                        }
+                        document.getElementById('rag-file-input')?.click();
+                      }}
                       className={`border border-dashed rounded-lg p-4 text-center cursor-pointer transition-all ${isDragging
                         ? 'border-rose-500 bg-rose-500/5'
                         : 'border-slate-800 hover:border-rose-500/50 hover:bg-slate-950/45'
@@ -496,13 +574,19 @@ export const QuizSetup: React.FC<QuizSetupProps> = ({
                         multiple
                         className="hidden"
                         accept=".txt,.md,.pdf,.docx,.xlsx,.xls,.pptx,.png,.jpg,.jpeg,.webp"
-                        onChange={(e) => handleFileChange(e.target.files)}
+                        onChange={(e) => {
+                          if (!isIAActive) {
+                            showLocalToast('Configure uma chave de API de IA em suas credenciais para usar RAG.', 'error');
+                            return;
+                          }
+                          handleFileChange(e.target.files);
+                        }}
                       />
                       <UploadCloud size={24} className="mx-auto text-slate-500 mb-1" />
                       <p className="text-[11px] font-bold text-slate-300">Arraste seus arquivos aqui ou clique para buscar</p>
                       <p className="text-[9px] text-slate-500 mt-0.5">PDF, DOCX, XLSX, PPTX, Imagens, TXT (Máx: 10MB)</p>
                     </div>
-
+ 
                     {ragFiles.length > 0 && (
                       <div className="space-y-1.5">
                         <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Arquivos ({ragFiles.length}/5)</p>
@@ -535,7 +619,7 @@ export const QuizSetup: React.FC<QuizSetupProps> = ({
                   </div>
                 )}
               </div>
-
+ 
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2.5">
@@ -554,7 +638,7 @@ export const QuizSetup: React.FC<QuizSetupProps> = ({
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleToggleModel('exam')}
+                    onClick={() => onToggleModelLocal('exam')}
                     className={`w-9 h-5 rounded-full transition-all relative ${activeModels.exam ? 'bg-rose-500' : 'bg-slate-800'}`}
                   >
                     <span className={`block w-4 h-4 rounded-full bg-white absolute top-0.5 left-0.5 transition-all ${activeModels.exam ? 'translate-x-4' : 'translate-x-0'}`} />
@@ -577,12 +661,12 @@ export const QuizSetup: React.FC<QuizSetupProps> = ({
             </div>
           </div>
         )}
-
+ 
         <Button
           type="submit"
           isLoading={isLoading}
-          variant={!isTriviaMode && getActiveCount() === 0 ? 'secondary' : 'primary'}
-          className={`w-full mt-4 ${!isTriviaMode && getActiveCount() === 0 ? 'opacity-40 cursor-not-allowed transform-none' : ''}`}
+          variant={!localTriviaMode && getActiveCount() === 0 ? 'secondary' : 'primary'}
+          className={`w-full mt-4 ${!localTriviaMode && getActiveCount() === 0 ? 'opacity-40 cursor-not-allowed transform-none' : ''}`}
         >
           Iniciar Quiz
         </Button>
